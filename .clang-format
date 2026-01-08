@@ -1,0 +1,52 @@
+---
+Language: Cpp
+BasedOnStyle: LLVM
+
+# 左大括号不换行（K&R 风格）
+BreakBeforeBraces: Attach
+
+# 缩进设置
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ContinuationIndentWidth: 4
+
+# 空格设置
+SpaceAfterControlStatementKeywords: true
+SpaceBeforeParens: ControlStatements
+SpaceAfterCStyleCast: false
+SpacesInParentheses: false
+SpacesInSquareBrackets: false
+SpacesInAngles: false
+
+# 运算符空格
+SpaceBeforeAssignmentOperators: true
+SpaceAfterTemplateKeyword: true
+
+# 指针和引用
+PointerAlignment: Left
+ReferenceAlignment: Left
+
+# 换行设置
+ColumnLimit: 100
+AllowShortIfStatementsOnASingleLine: false
+AllowShortLoopsOnASingleLine: false
+AllowShortFunctionsOnASingleLine: None
+AllowShortBlocksOnASingleLine: false
+
+# 空行设置
+KeepEmptyLinesAtTheStartOfBlocks: false
+MaxEmptyLinesToKeep: 1
+
+# 参数和参数打包
+BinPackArguments: true
+BinPackParameters: true
+AllowAllParametersOfDeclarationOnNextLine: true
+AllowAllArgumentsOnNextLine: true
+
+# 其他
+SortIncludes: false
+IncludeBlocks: Preserve
+
+
+
