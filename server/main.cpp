@@ -1,5 +1,6 @@
-#include "commands.h"
-#include "shared_memory_pool.h"
+#include "command/commands.h"
+#include "shared_memory_pool/shared_memory_pool.h"
+#include "persistence/persistence.h"
 #include <iostream>
 #include <sstream>
 #include <vector>

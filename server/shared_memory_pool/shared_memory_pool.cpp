@@ -1,6 +1,7 @@
 #include "shared_memory_pool.h"
 #include <cstring>
 #include <algorithm>
+#include <fstream>
 
 bool SharedMemoryPool::Init() {
     try {

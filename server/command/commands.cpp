@@ -1,5 +1,5 @@
 #include "commands.h"
-#include "shared_memory_pool.h"
+#include "../shared_memory_pool/shared_memory_pool.h"
 #include <iostream>
 #include <iomanip>
 #include <algorithm>
@@ -140,15 +140,15 @@ void HandleCommand(const std::vector<std::string>& tokens, SharedMemoryPool& smp
         } else if (mode == "--block") {
             // 原来的 blocks 命令内容
             std::cout << "Block Pool Status:\n";
-            std::cout << "|     ID    |   Occupied Client   |\n";
-            std::cout << "|-----------|---------------------|\n";
+            std::cout << "|     ID    |    Occupied Client    |\n";
+            std::cout << "|-----------|-----------------------|\n";
             for (size_t i = 0; i < SharedMemoryPool::kBlockCount; i++) {
                 const auto& meta = smp.GetMeta(i);
                 std::ostringstream oss;
                 oss << "block_" << std::setfill('0') << std::setw(3) << i << std::setfill(' ');
                 std::string client = meta.user.empty() ? "-" : meta.user;
-                std::cout << "| " << std::setw(9) << oss.str() << " | " << std::setw(19) << client
-                          << " |\n";
+                std::cout << "| " << std::setw(9) << oss.str() << " | " << std::left
+                          << std::setw(21) << client << " |\n";
             }
         } else {
             std::cout << "Unknown status mode: " << mode << "\n";

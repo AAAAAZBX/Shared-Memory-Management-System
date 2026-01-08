@@ -42,6 +42,31 @@ class SharedMemoryPool {
     std::string
     GetUserContentAsString(const std::string& user) const; // 获取用户内容字符串（遇到0停止）
 
+    // 持久化相关
+    bool SaveToFile(const std::string& filename) const;                // 保存到文件
+    bool LoadFromFile(const std::string& filename);                    // 从文件加载
+    static constexpr const char* kDefaultSaveFile = "memory_pool.dat"; // 默认保存文件名
+
+    // 持久化辅助接口（供 persistence.cpp 使用）
+    const uint8_t* GetPoolData() const {
+        return pool_.data();
+    }
+    uint8_t* GetPoolData() {
+        return pool_.data();
+    }
+    size_t GetFreeBlockCount() const {
+        return free_block_count;
+    }
+    const std::bitset<kBlockCount>& GetUsedMap() const {
+        return used_map;
+    }
+    std::bitset<kBlockCount>& GetUsedMap() {
+        return used_map;
+    }
+    void SetFreeBlockCount(size_t count) {
+        free_block_count = count;
+    }
+
   private:
     // 1MB内存池
     std::vector<uint8_t> pool_;                 // 1MB
