@@ -206,10 +206,6 @@ Shared-Memory-Manage-System/
 3. 内存池大小可在 `shared_memory_pool.h` 中通过 `kPoolSize` 常量调整
 4. 建议使用支持 C++17 的编译器（g++ 7.0+ 或 MSVC 2017+）
 
-## 作者
-
-[您的姓名/团队]
-
 ## 更新日志
 
 ### v0.1.0 (当前版本)
