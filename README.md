@@ -58,7 +58,13 @@
 - 程序启动时自动加载之前保存的状态
 - 二进制文件格式，包含文件头、元数据、使用状态位图、用户块信息和内存池数据
 
-#### 10. 内存池重置（`reset`）
+#### 10. 批量执行（`exec`）
+- `exec <filename>`：从文件读取并执行命令
+- 支持空行和注释（以 `#` 开头）
+- 显示执行的行号和命令
+- 遇到 `quit`/`exit` 时停止执行（不退出程序）
+
+#### 11. 内存池重置（`reset`）
 - `reset`：清空所有内存数据并将元数据重置为默认状态
 - 需要密码确认，防止误操作
 - 重置后内存池恢复到初始状态（所有块为空闲）
@@ -189,6 +195,14 @@ server> delete client_1  # free 的别名
 # 更新用户内容
 server> update client_1 "Updated Content"
 
+# 批量执行命令文件
+server> exec sample.txt
+[1] alloc 192.168.134.233:32415 "1145141919810"
+Allocation successful. Content stored at block 0
+[2] alloc 192.168.134.255:54321 "114514"
+Allocation successful. Content stored at block 1
+Finished executing commands from 'sample.txt'
+
 # 紧凑内存
 server> compact
 
@@ -276,6 +290,7 @@ Shared-Memory-Manage-System/
 | 命令行界面 | ✅ 完成   | 100%   |
 | 状态查询   | ✅ 完成   | 100%   |
 | 内容读取   | ✅ 完成   | 100%   |
+| 批量执行   | ✅ 完成   | 100%   |
 | 数据持久化 | ✅ 完成   | 100%   |
 | TCP 服务器 | ⏳ 待实现 | 0%     |
 | 客户端程序 | ⏳ 待实现 | 0%     |
@@ -284,6 +299,7 @@ Shared-Memory-Manage-System/
 
 ### 短期目标
 - [x] 完成数据持久化功能（保存/加载内存池状态）
+- [x] 实现批量执行功能（`exec` 命令）
 - [ ] TCP 服务器功能（监听端口，接受客户端连接）
 - [ ] 客户端程序（`client.exe`）
 - [ ] 网络协议实现（请求/响应格式）
@@ -316,7 +332,14 @@ Shared-Memory-Manage-System/
 
 ## 更新日志
 
-### v0.3.0 (当前版本)
+### v0.3.1 (当前版本)
+- ✅ 实现 `exec` 命令，支持从文件批量执行命令
+- ✅ 实现 `free`/`delete` 命令，支持释放用户内存
+- ✅ 实现 `update` 命令，支持更新用户内容
+- ✅ 修复 `compact` 后元数据清理问题
+- ✅ 优化 `status --block` 显示逻辑（检查 `used` 状态）
+
+### v0.3.0
 - ✅ 完成数据持久化功能（保存/加载内存池状态）
 - ✅ 实现信号处理（Ctrl+C、Ctrl+Z 自动保存）
 - ✅ 优化 `status --memory` 显示顺序（按起始 block 排序）

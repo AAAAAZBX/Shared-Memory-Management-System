@@ -38,6 +38,7 @@ class SharedMemoryPool {
     // 内存释放相关
     bool FreeByUser(const std::string& user); // 释放用户所有内存
     bool FreeByBlockId(size_t blockId);       // 释放内存
+    void ClearBlockMeta(size_t blockId);      // 清理块的元数据（不更新 free_block_count）
 
     // 用户内容查询（直接从内存池读取）
     std::string
@@ -70,6 +71,7 @@ class SharedMemoryPool {
     void SetUserBlockInfo(const std::map<std::string, std::pair<size_t, size_t>>& info) {
         user_block_info = info;
     }
+    void UpdateUserBlockCount(const std::string& user, size_t newBlockCount);
 
   private:
     // 1MB内存池

@@ -47,6 +47,20 @@ const std::map<std::string, std::pair<size_t, size_t>>& SharedMemoryPool::GetUse
     return user_block_info;
 }
 
+void SharedMemoryPool::UpdateUserBlockCount(const std::string& user, size_t newBlockCount) {
+    auto it = user_block_info.find(user);
+    if (it != user_block_info.end()) {
+        size_t oldBlockCount = it->second.second;
+        it->second.second = newBlockCount;
+        // 更新空闲块计数
+        if (newBlockCount < oldBlockCount) {
+            free_block_count += (oldBlockCount - newBlockCount);
+        } else if (newBlockCount > oldBlockCount) {
+            free_block_count -= (newBlockCount - oldBlockCount);
+        }
+    }
+}
+
 const SharedMemoryPool::BlockMeta& SharedMemoryPool::GetMeta(size_t blockId) const {
     return meta_[blockId];
 }
@@ -82,11 +96,13 @@ void SharedMemoryPool::Compact() {
                             kBlockSize);
                 // 移动元数据
                 meta_[freePos] = meta_[i];
+                // 清理源位置的元数据
+                meta_[i] = BlockMeta{};
                 // 更新 used_map
                 used_map.set(freePos, true);
                 used_map.set(i, false);
-                user_block_info[meta_[i].user].first =
-                    std::min(user_block_info[meta_[i].user].first, freePos);
+                user_block_info[meta_[freePos].user].first =
+                    std::min(user_block_info[meta_[freePos].user].first, freePos);
             }
             freePos++;
         }
@@ -174,6 +190,12 @@ bool SharedMemoryPool::FreeByBlockId(size_t blockId) {
     meta_[blockId] = BlockMeta{};
     free_block_count++;
     return true;
+}
+
+void SharedMemoryPool::ClearBlockMeta(size_t blockId) {
+    used_map.set(blockId, false);
+    meta_[blockId].used = false;
+    meta_[blockId].user.clear();
 }
 
 std::string SharedMemoryPool::GetUserContentAsString(const std::string& user) const {

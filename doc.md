@@ -171,7 +171,7 @@ Shared-Memory-Manage-System/
 #### 命令处理模块 (`command`)
 - **职责**：解析和执行用户命令
 - **核心函数**：`HandleCommand()`
-- **支持命令**：help、status、alloc、read、free/delete、update、compact、reset、quit
+- **支持命令**：help、status、alloc、read、free/delete、update、exec、compact、reset、quit
 
 #### 持久化模块 (`persistence`)
 - **职责**：序列化/反序列化内存池状态
@@ -272,6 +272,7 @@ struct CommandSpec {
 - **free <user>**：释放指定用户的内存
 - **delete <user>**：释放指定用户的内存（`free` 的别名）
 - **update <user> "<new_content>"**：更新用户内容
+- **exec <filename>**：从文件批量执行命令
 - **compact**：紧凑内存
 - **reset**：重置内存池（需要密码确认）
 - **quit/exit**：退出程序
@@ -282,6 +283,13 @@ struct CommandSpec {
 - 解析命令和参数
 - 调用相应的内存池接口
 - 格式化输出结果
+
+**exec 命令特性**
+- 从文件逐行读取命令并执行
+- 支持空行和注释（以 `#` 开头）
+- 显示执行的行号和命令内容
+- 遇到 `quit`/`exit` 时停止执行（不退出程序）
+- 自动去除行首尾空白字符
 
 ### 2.3 持久化模块
 

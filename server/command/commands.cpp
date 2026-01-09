@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <sstream>
 #include <cstring>
+#include <fstream>
 
 static const std::vector<CommandSpec> kCmds = {
     // 帮助命令
@@ -47,12 +48,30 @@ static const std::vector<CommandSpec> kCmds = {
     // 紧凑命令
     {"compact", "Compact memory pool (merge free blocks)", "compact", {"compact"}},
 
+    // 执行文件命令
+    {"exec",
+     "Execute commands from a file",
+     "exec <filename>",
+     {"exec sample.txt", "exec commands.txt"}},
+
     // 重置命令
     {"reset", "Reset memory pool (requires password confirmation)", "reset", {"reset"}},
 
     // 退出命令
     {"quit", "Exit server console", "quit", {"quit"}}};
 
+// 辅助函数：分割字符串
+static std::vector<std::string> Split(const std::string& line) {
+    std::istringstream iss(line);
+    std::vector<std::string> tokens;
+    std::string token;
+    while (iss >> token) {
+        tokens.push_back(token);
+    }
+    return tokens;
+}
+
+// 查找命令
 static const CommandSpec* Find(const std::string& name) {
     for (const auto& c : kCmds) {
         if (c.name == name)
@@ -189,7 +208,8 @@ void HandleCommand(const std::vector<std::string>& tokens, SharedMemoryPool& smp
                 const auto& meta = smp.GetMeta(i);
                 std::ostringstream oss;
                 oss << "block_" << std::setfill('0') << std::setw(3) << i << std::setfill(' ');
-                std::string client = meta.user.empty() ? "-" : meta.user;
+                // 检查块是否被使用，而不是只检查 user 是否为空
+                std::string client = (meta.used && !meta.user.empty()) ? meta.user : "-";
                 std::cout << "| " << std::setw(9) << oss.str() << " | " << std::left
                           << std::setw(21) << client << " |\n";
             }
@@ -332,7 +352,8 @@ void HandleCommand(const std::vector<std::string>& tokens, SharedMemoryPool& smp
             // 新内容大小不超过原分配，直接覆盖写入
             uint8_t* poolData = smp.GetPoolData();
             size_t bytesWritten = 0;
-            for (size_t i = 0; i < currentBlockCount; ++i) {
+            // 只写入需要的块数，而不是所有 currentBlockCount 块
+            for (size_t i = 0; i < requiredBlockCount; ++i) {
                 size_t blockId = startBlock + i;
                 size_t bytesToWrite =
                     std::min(SharedMemoryPool::kBlockSize, newSize - bytesWritten);
@@ -348,10 +369,20 @@ void HandleCommand(const std::vector<std::string>& tokens, SharedMemoryPool& smp
                 }
 
                 bytesWritten += bytesToWrite;
-                if (bytesWritten >= newSize) {
-                    break;
+            }
+
+            // 如果新内容需要的块数少于原分配，释放后续不需要的块
+            if (requiredBlockCount < currentBlockCount) {
+                // 先更新用户块信息中的块数量和 free_block_count
+                smp.UpdateUserBlockCount(user, requiredBlockCount);
+                // 然后清理后续块的元数据和位图（不更新 free_block_count，因为已经通过
+                // UpdateUserBlockCount 更新了）
+                for (size_t i = requiredBlockCount; i < currentBlockCount; ++i) {
+                    size_t blockId = startBlock + i;
+                    smp.ClearBlockMeta(blockId);
                 }
             }
+
             std::cout << "Content updated successfully.\n";
         }
         return;
@@ -362,6 +393,57 @@ void HandleCommand(const std::vector<std::string>& tokens, SharedMemoryPool& smp
         std::cout << "Compacting memory pool...\n";
         smp.Compact();
         std::cout << "Memory pool compacted\n";
+        return;
+    }
+
+    // exec 命令
+    else if (cmd == "exec") {
+        if (tokens.size() < 2) {
+            std::cout << "Usage: exec <filename>\n";
+            std::cout << "Example: exec sample.txt\n";
+            return;
+        }
+
+        std::string filename = tokens[1];
+        std::ifstream file(filename);
+        if (!file.is_open()) {
+            std::cout << "Error: Cannot open file '" << filename << "'\n";
+            return;
+        }
+
+        std::string line;
+        size_t lineNum = 0;
+        while (std::getline(file, line)) {
+            lineNum++;
+            // 跳过空行和注释行（以 # 开头）
+            if (line.empty() || line[0] == '#') {
+                continue;
+            }
+
+            // 去除行首尾空白
+            line.erase(0, line.find_first_not_of(" \t"));
+            line.erase(line.find_last_not_of(" \t") + 1);
+            if (line.empty()) {
+                continue;
+            }
+
+            // 显示正在执行的命令
+            std::cout << "[" << lineNum << "] " << line << "\n";
+
+            // 解析并执行命令
+            auto fileTokens = Split(line);
+            if (!fileTokens.empty()) {
+                // 如果是 quit 命令，只退出 exec，不退出程序
+                if (fileTokens[0] == "quit" || fileTokens[0] == "exit") {
+                    std::cout << "Quit command in file, stopping execution.\n";
+                    break;
+                }
+                HandleCommand(fileTokens, smp);
+            }
+        }
+
+        file.close();
+        std::cout << "Finished executing commands from '" << filename << "'\n";
         return;
     }
 
