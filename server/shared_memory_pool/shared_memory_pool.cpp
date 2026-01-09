@@ -2,6 +2,9 @@
 #include <cstring>
 #include <algorithm>
 #include <fstream>
+#include <ctime>
+#include <iomanip>
+#include <sstream>
 
 bool SharedMemoryPool::Init() {
     try {
@@ -23,6 +26,7 @@ void SharedMemoryPool::Reset() {
         m = BlockMeta{};
     }
     user_block_info.clear();
+    user_last_modified_time.clear(); // Clear last modified times
 }
 
 bool SharedMemoryPool::SetMeta(size_t blockId, const std::string& user) {
@@ -58,6 +62,8 @@ void SharedMemoryPool::UpdateUserBlockCount(const std::string& user, size_t newB
         } else if (newBlockCount > oldBlockCount) {
             free_block_count -= (newBlockCount - oldBlockCount);
         }
+        // 更新最后修改时间
+        user_last_modified_time[user] = std::time(nullptr);
     }
 }
 
@@ -83,6 +89,22 @@ int SharedMemoryPool::FindContinuousFreeBlock(size_t blockCount) {
     return -1;
 }
 
+size_t SharedMemoryPool::GetMaxContinuousFreeBlocks() const {
+    size_t maxContinuous = 0;
+    size_t currentContinuous = 0;
+
+    for (size_t i = 0; i < kBlockCount; ++i) {
+        if (!used_map[i]) {
+            currentContinuous++;
+            maxContinuous = std::max(maxContinuous, currentContinuous);
+        } else {
+            currentContinuous = 0;
+        }
+    }
+
+    return maxContinuous;
+}
+
 void SharedMemoryPool::Compact() {
     // 找到第一个空闲块的位置
     size_t freePos = 0;
@@ -92,8 +114,8 @@ void SharedMemoryPool::Compact() {
             // 如果当前块已使用，且不在正确位置，需要移动
             if (i != freePos) {
                 // 移动数据
-                std::memcpy(pool_.data() + freePos * kBlockSize, pool_.data() + i * kBlockSize,
-                            kBlockSize);
+                memcpy(pool_.data() + freePos * kBlockSize, pool_.data() + i * kBlockSize,
+                       kBlockSize);
                 // 移动元数据
                 meta_[freePos] = meta_[i];
                 // 清理源位置的元数据
@@ -144,13 +166,13 @@ int SharedMemoryPool::AllocateBlock(const std::string& user, const void* data, s
         size_t bytesToWrite = std::min(kBlockSize, dataSize - bytesWritten);
 
         // 写入数据
-        std::memcpy(pool_.data() + blockId * kBlockSize,
-                    static_cast<const uint8_t*>(data) + bytesWritten, bytesToWrite);
+        memcpy(pool_.data() + blockId * kBlockSize,
+               static_cast<const uint8_t*>(data) + bytesWritten, bytesToWrite);
 
         // 如果块没有写满，剩余部分清零
         if (bytesToWrite < kBlockSize) {
-            std::memset(pool_.data() + blockId * kBlockSize + bytesToWrite, 0,
-                        kBlockSize - bytesToWrite);
+            memset(pool_.data() + blockId * kBlockSize + bytesToWrite, 0,
+                   kBlockSize - bytesToWrite);
         }
 
         // 设置元数据
@@ -164,6 +186,8 @@ int SharedMemoryPool::AllocateBlock(const std::string& user, const void* data, s
 
     user_block_info[user].first = startBlock;
     user_block_info[user].second = requiredBlocks;
+    // 更新最后修改时间
+    user_last_modified_time[user] = std::time(nullptr);
 
     return startBlock;
 }
@@ -179,6 +203,7 @@ bool SharedMemoryPool::FreeByUser(const std::string& user) {
         meta_[i] = BlockMeta{};
     }
     user_block_info.erase(user);
+    user_last_modified_time.erase(user); // 删除最后修改时间记录
     free_block_count += count;
     return true;
 }
@@ -196,6 +221,30 @@ void SharedMemoryPool::ClearBlockMeta(size_t blockId) {
     used_map.set(blockId, false);
     meta_[blockId].used = false;
     meta_[blockId].user.clear();
+}
+
+time_t SharedMemoryPool::GetUserLastModifiedTime(const std::string& user) const {
+    auto it = user_last_modified_time.find(user);
+    if (it != user_last_modified_time.end()) {
+        return it->second;
+    }
+    return 0; // 返回0表示没有记录
+}
+
+std::string SharedMemoryPool::GetUserLastModifiedTimeString(const std::string& user) const {
+    time_t timeValue = GetUserLastModifiedTime(user);
+    if (timeValue == 0) {
+        return "N/A";
+    }
+
+    std::tm* timeInfo = std::localtime(&timeValue);
+    if (timeInfo == nullptr) {
+        return "N/A";
+    }
+
+    std::ostringstream oss;
+    oss << std::put_time(timeInfo, "%Y-%m-%d %H:%M:%S");
+    return oss.str();
 }
 
 std::string SharedMemoryPool::GetUserContentAsString(const std::string& user) const {

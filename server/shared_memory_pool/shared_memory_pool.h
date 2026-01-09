@@ -6,6 +6,7 @@
 #include <vector>
 #include <bitset>
 #include <map>
+#include <ctime>
 
 class SharedMemoryPool {
   public:
@@ -27,10 +28,14 @@ class SharedMemoryPool {
     // 用于加载时直接设置元数据（不检查 used_map，不修改 free_block_count）
     void SetMetaForLoad(size_t blockId, const std::string& user);
     const std::map<std::string, std::pair<size_t, size_t>>& GetUserBlockInfo() const;
+    // 获取用户最后修改时间
+    time_t GetUserLastModifiedTime(const std::string& user) const;
+    std::string GetUserLastModifiedTimeString(const std::string& user) const;
 
     // 内存分配相关
     // 暂定一个用户只能申请一块内存
     int FindContinuousFreeBlock(size_t blockCount); // 查找连续的空闲块
+    size_t GetMaxContinuousFreeBlocks() const;      // 获取最大连续空闲块数
     void Compact();                                 // 紧凑内存
     int AllocateBlock(const std::string& user, const void* data,
                       size_t dataSize); // 分配内存
@@ -72,6 +77,13 @@ class SharedMemoryPool {
         user_block_info = info;
     }
     void UpdateUserBlockCount(const std::string& user, size_t newBlockCount);
+    // 获取和设置用户最后修改时间（供持久化使用）
+    const std::map<std::string, time_t>& GetUserLastModifiedTimeMap() const {
+        return user_last_modified_time;
+    }
+    void SetUserLastModifiedTimeMap(const std::map<std::string, time_t>& timeMap) {
+        user_last_modified_time = timeMap;
+    }
 
   private:
     // 1MB内存池
@@ -82,4 +94,6 @@ class SharedMemoryPool {
     std::bitset<kBlockCount> used_map;     // 记录256个块是否被使用
     // 记录用户使用情况
     std::map<std::string, std::pair<size_t, size_t>> user_block_info; // 用户使用块起始位置+数量
+    // 记录用户最后修改时间
+    std::map<std::string, time_t> user_last_modified_time; // 用户最后修改时间戳
 };

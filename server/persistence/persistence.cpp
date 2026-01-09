@@ -5,7 +5,7 @@
 
 namespace Persistence {
 // 文件格式版本号和魔数
-static constexpr uint32_t kFileVersion = 1;
+static constexpr uint32_t kFileVersion = 2; // 版本2：添加了 user_last_modified_time
 static constexpr uint32_t kFileMagic = 0x4D454D50; // "MEMP"
 
 // 文件头结构
@@ -80,7 +80,19 @@ bool Save(const SharedMemoryPool& smp, const std::string& filename) {
             file.write(reinterpret_cast<const char*>(&entry.second.second), sizeof(size_t));
         }
 
-        // 5. 写入内存池数据
+        // 5. 写入 user_last_modified_time
+        const auto& timeMap = smp.GetUserLastModifiedTimeMap();
+        size_t timeMapCount = timeMap.size();
+        file.write(reinterpret_cast<const char*>(&timeMapCount), sizeof(size_t));
+        for (const auto& entry : timeMap) {
+            size_t keyLen = entry.first.size();
+            file.write(reinterpret_cast<const char*>(&keyLen), sizeof(size_t));
+            file.write(entry.first.c_str(), keyLen);
+            time_t timeValue = entry.second;
+            file.write(reinterpret_cast<const char*>(&timeValue), sizeof(time_t));
+        }
+
+        // 6. 写入内存池数据
         const uint8_t* poolData = smp.GetPoolData();
         file.write(reinterpret_cast<const char*>(poolData), SharedMemoryPool::kPoolSize);
 
@@ -101,7 +113,11 @@ bool Load(SharedMemoryPool& smp, const std::string& filename) {
         FileHeader header{};
         file.read(reinterpret_cast<char*>(&header), sizeof(FileHeader));
 
-        if (header.magic != kFileMagic || header.version != kFileVersion) {
+        if (header.magic != kFileMagic) {
+            return false;
+        }
+        // 支持版本1和版本2
+        if (header.version != 1 && header.version != 2) {
             return false;
         }
 
@@ -167,7 +183,27 @@ bool Load(SharedMemoryPool& smp, const std::string& filename) {
         }
         smp.SetUserBlockInfo(userInfo);
 
-        // 8. 读取内存池数据
+        // 8. 读取 user_last_modified_time（版本2新增）
+        if (header.version >= 2) {
+            size_t timeMapCount;
+            file.read(reinterpret_cast<char*>(&timeMapCount), sizeof(size_t));
+            std::map<std::string, time_t> timeMap;
+            for (size_t i = 0; i < timeMapCount; ++i) {
+                size_t keyLen;
+                file.read(reinterpret_cast<char*>(&keyLen), sizeof(size_t));
+                std::string key(keyLen, '\0');
+                if (keyLen > 0) {
+                    file.read(&key[0], keyLen);
+                }
+                time_t timeValue;
+                file.read(reinterpret_cast<char*>(&timeValue), sizeof(time_t));
+                timeMap[key] = timeValue;
+            }
+            smp.SetUserLastModifiedTimeMap(timeMap);
+        }
+        // 版本1的文件没有时间信息，timeMap 保持为空
+
+        // 9. 读取内存池数据
         uint8_t* poolData = smp.GetPoolData();
         file.read(reinterpret_cast<char*>(poolData), SharedMemoryPool::kPoolSize);
 

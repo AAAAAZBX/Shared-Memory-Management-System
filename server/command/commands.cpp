@@ -1,11 +1,13 @@
 #include "commands.h"
 #include "../shared_memory_pool/shared_memory_pool.h"
+#include "../persistence/persistence.h"
 #include <iostream>
 #include <iomanip>
 #include <algorithm>
 #include <sstream>
 #include <cstring>
 #include <fstream>
+#include <climits>
 
 static const std::vector<CommandSpec> kCmds = {
     // 帮助命令
@@ -16,6 +18,9 @@ static const std::vector<CommandSpec> kCmds = {
      "Show server status (use --memory or --block)",
      "status [--memory|--block]",
      {"status", "status --memory", "status --block"}},
+
+    // 信息命令
+    {"info", "Show comprehensive system information", "info", {"info"}},
 
     // 分配命令
     {"alloc",
@@ -173,8 +178,10 @@ void HandleCommand(const std::vector<std::string>& tokens, SharedMemoryPool& smp
         if (mode == "--memory") {
             // 原来的 status 命令内容
             std::cout << "Memory Pool Status:\n";
-            std::cout << "|          range          |    Occupied Client    |\n";
-            std::cout << "|-------------------------|-----------------------|\n";
+            std::cout
+                << "|          range          |    Occupied Client    |    Last Modified    |\n";
+            std::cout
+                << "|-------------------------|-----------------------|---------------------|\n";
 
             // 使用指针避免复制数据，按起始 block 排序
             const auto& userInfo = smp.GetUserBlockInfo();
@@ -196,27 +203,198 @@ void HandleCommand(const std::vector<std::string>& tokens, SharedMemoryPool& smp
                             << "block_" << std::setfill('0') << std::setw(3)
                             << (entry->second.first + entry->second.second - 1);
                 std::string rangeStr = rangeStream.str();
+                std::string lastModified = smp.GetUserLastModifiedTimeString(entry->first);
                 std::cout << "| " << std::left << std::setw(23) << std::setfill(' ') << rangeStr
-                          << " | " << std::left << std::setw(21) << entry->first << " |\n";
+                          << " | " << std::left << std::setw(21) << entry->first << " | "
+                          << std::left << std::setw(19) << lastModified << " |\n";
             }
         } else if (mode == "--block") {
             // 原来的 blocks 命令内容
             std::cout << "Block Pool Status:\n";
-            std::cout << "|     ID    |    Occupied Client    |\n";
-            std::cout << "|-----------|-----------------------|\n";
+            std::cout << "|     ID    |    Occupied Client    |    Last Modified    |\n";
+            std::cout << "|-----------|-----------------------|---------------------|\n";
             for (size_t i = 0; i < SharedMemoryPool::kBlockCount; i++) {
                 const auto& meta = smp.GetMeta(i);
                 std::ostringstream oss;
                 oss << "block_" << std::setfill('0') << std::setw(3) << i << std::setfill(' ');
                 // 检查块是否被使用，而不是只检查 user 是否为空
                 std::string client = (meta.used && !meta.user.empty()) ? meta.user : "-";
+                std::string lastModified = "-";
+                if (meta.used && !meta.user.empty()) {
+                    lastModified = smp.GetUserLastModifiedTimeString(meta.user);
+                }
                 std::cout << "| " << std::setw(9) << oss.str() << " | " << std::left
-                          << std::setw(21) << client << " |\n";
+                          << std::setw(21) << client << " | " << std::left << std::setw(19)
+                          << lastModified << " |\n";
             }
         } else {
             std::cout << "Unknown status mode: " << mode << "\n";
             std::cout << "Usage: status [--memory|--block]\n";
         }
+        return;
+    }
+
+    // info 命令
+    else if (cmd == "info") {
+        std::cout << "\n";
+        std::cout << "==============================================================\n";
+        std::cout << "          Shared Memory Pool System Info\n";
+        std::cout << "==============================================================\n";
+        std::cout << "\n";
+
+        // 1. 内存池基本信息
+        std::cout << "[Memory Pool Configuration]\n";
+        std::cout << "  +--------------------------------------------------------+\n";
+        std::cout << "  | Total Size:     " << std::setw(10) << std::right
+                  << (SharedMemoryPool::kPoolSize / 1024) << " KB (" << SharedMemoryPool::kPoolSize
+                  << " bytes)\n";
+        std::cout << "  | Block Size:     " << std::setw(10) << std::right
+                  << (SharedMemoryPool::kBlockSize / 1024) << " KB ("
+                  << SharedMemoryPool::kBlockSize << " bytes)\n";
+        std::cout << "  | Total Blocks:   " << std::setw(10) << std::right
+                  << SharedMemoryPool::kBlockCount << " blocks\n";
+        std::cout << "  +--------------------------------------------------------+\n";
+        std::cout << "\n";
+
+        // 2. 使用情况统计
+        size_t usedBlocks = SharedMemoryPool::kBlockCount - smp.GetFreeBlockCount();
+        size_t freeBlocks = smp.GetFreeBlockCount();
+        double usagePercent =
+            (static_cast<double>(usedBlocks) / SharedMemoryPool::kBlockCount) * 100.0;
+        size_t usedBytes = usedBlocks * SharedMemoryPool::kBlockSize;
+        size_t freeBytes = freeBlocks * SharedMemoryPool::kBlockSize;
+
+        std::cout << "[Usage Statistics]\n";
+        std::cout << "  +--------------------------------------------------------+\n";
+        std::cout << "  | Used:           " << std::setw(6) << std::right << usedBlocks
+                  << " blocks (" << std::setw(8) << std::right << (usedBytes / 1024) << " KB) ["
+                  << std::fixed << std::setprecision(1) << std::setw(5) << std::right
+                  << usagePercent << "%]\n";
+        std::cout << "  | Free:           " << std::setw(6) << std::right << freeBlocks
+                  << " blocks (" << std::setw(8) << std::right << (freeBytes / 1024) << " KB) ["
+                  << std::fixed << std::setprecision(1) << std::setw(5) << std::right
+                  << (100.0 - usagePercent) << "%]\n";
+        std::cout << "  +--------------------------------------------------------+\n";
+        std::cout << "\n";
+
+        // 3. 内存分布信息
+        size_t maxContinuous = smp.GetMaxContinuousFreeBlocks();
+        size_t maxContinuousBytes = maxContinuous * SharedMemoryPool::kBlockSize;
+        const auto& usedMap = smp.GetUsedMap();
+
+        // 计算碎片化程度（空闲块片段数量）
+        size_t freeFragments = 0;
+        bool inFreeBlock = false;
+        for (size_t i = 0; i < SharedMemoryPool::kBlockCount; ++i) {
+            if (!usedMap[i]) {
+                if (!inFreeBlock) {
+                    freeFragments++;
+                    inFreeBlock = true;
+                }
+            } else {
+                inFreeBlock = false;
+            }
+        }
+
+        std::cout << "[Memory Distribution]\n";
+        std::cout << "  +--------------------------------------------------------+\n";
+        std::cout << "  | Max Continuous: " << std::setw(6) << std::right << maxContinuous
+                  << " blocks (" << std::setw(8) << std::right << (maxContinuousBytes / 1024)
+                  << " KB)\n";
+        std::cout << "  | Free Fragments: " << std::setw(6) << std::right << freeFragments
+                  << " fragments\n";
+        if (freeFragments > 1) {
+            std::cout << "  | Fragmentation:  Needs compact operation\n";
+        } else {
+            std::cout << "  | Fragmentation:  Memory is continuous, no compact needed\n";
+        }
+        std::cout << "  +--------------------------------------------------------+\n";
+        std::cout << "\n";
+
+        // 4. 用户统计
+        const auto& userInfo = smp.GetUserBlockInfo();
+        size_t userCount = userInfo.size();
+        size_t totalUserBlocks = 0;
+        size_t maxUserBlocks = 0;
+        size_t minUserBlocks = (userCount > 0) ? static_cast<size_t>(-1) : 0;
+        std::string maxUser, minUser;
+
+        for (const auto& entry : userInfo) {
+            size_t blockCount = entry.second.second;
+            totalUserBlocks += blockCount;
+            if (blockCount > maxUserBlocks) {
+                maxUserBlocks = blockCount;
+                maxUser = entry.first;
+            }
+            if (blockCount < minUserBlocks) {
+                minUserBlocks = blockCount;
+                minUser = entry.first;
+            }
+        }
+
+        double avgUserBlocks =
+            (userCount > 0) ? (static_cast<double>(totalUserBlocks) / userCount) : 0.0;
+
+        std::cout << "[User Statistics]\n";
+        std::cout << "  +--------------------------------------------------------+\n";
+        std::cout << "  | Active Users:   " << std::setw(6) << std::right << userCount
+                  << " users\n";
+        if (userCount > 0) {
+            std::cout << "  | Avg Blocks/User:" << std::fixed << std::setprecision(2)
+                      << std::setw(10) << std::right << avgUserBlocks << " blocks/user\n";
+            std::cout << "  | Max Usage:      " << std::setw(6) << std::right << maxUserBlocks
+                      << " blocks (" << std::setw(25) << std::left << maxUser << ")\n";
+            if (userCount > 1) {
+                std::cout << "  | Min Usage:      " << std::setw(6) << std::right << minUserBlocks
+                          << " blocks (" << std::setw(25) << std::left << minUser << ")\n";
+            }
+        }
+        std::cout << "  +--------------------------------------------------------+\n";
+        std::cout << "\n";
+
+        // 5. 持久化状态
+        std::string persistenceFileName = "memory_pool.dat";
+        std::ifstream persistenceFile(persistenceFileName, std::ios::binary);
+        bool persistenceExists = persistenceFile.good();
+        persistenceFile.close();
+
+        std::cout << "[Persistence Status]\n";
+        std::cout << "  +--------------------------------------------------------+\n";
+        if (persistenceExists) {
+            std::ifstream file(persistenceFileName, std::ios::binary | std::ios::ate);
+            size_t fileSize = file.tellg();
+            file.close();
+            std::cout << "  | Persistence File: Exists (" << persistenceFileName << ")\n";
+            std::cout << "  | File Size:       " << std::setw(10) << std::right << (fileSize / 1024)
+                      << " KB (" << fileSize << " bytes)\n";
+        } else {
+            std::cout << "  | Persistence File: Not found\n";
+        }
+        std::cout << "  +--------------------------------------------------------+\n";
+        std::cout << "\n";
+
+        // 6. 系统建议
+        std::cout << "[System Recommendations]\n";
+        std::cout << "  +--------------------------------------------------------+\n";
+        if (usagePercent > 90.0) {
+            std::cout << "  | [WARNING] Memory usage is high, consider freeing some memory\n";
+        } else if (usagePercent < 10.0) {
+            std::cout << "  | [OK] Memory usage is low, sufficient space available\n";
+        } else {
+            std::cout << "  | [OK] Memory usage is normal\n";
+        }
+
+        if (freeFragments > 1 && freeBlocks > 0) {
+            std::cout
+                << "  | [WARNING] Memory fragmentation detected, consider running 'compact'\n";
+        }
+
+        if (userCount == 0) {
+            std::cout << "  | [INFO] No active users currently\n";
+        }
+        std::cout << "  +--------------------------------------------------------+\n";
+        std::cout << "\n";
+
         return;
     }
 
