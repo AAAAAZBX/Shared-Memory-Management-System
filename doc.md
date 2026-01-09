@@ -241,6 +241,8 @@ static constexpr size_t kBlockCount = 256;          // 256 块
 - `const BlockMeta& GetMeta(size_t blockId)`：获取块的元数据
 - `const std::map<std::string, std::pair<size_t, size_t>>& GetUserBlockInfo()`：获取用户块映射表
 - `std::string GetUserContentAsString(const std::string& user)`：读取用户内容（遇到0停止）
+- `time_t GetUserLastModifiedTime(const std::string& user)`：获取用户最后修改时间戳
+- `std::string GetUserLastModifiedTimeString(const std::string& user)`：获取用户最后修改时间字符串（格式：YYYY-MM-DD HH:MM:SS）
 
 **工具方法**
 - `void Compact()`：紧凑内存，合并碎片，将所有已使用的块移动到前端
@@ -266,7 +268,7 @@ struct CommandSpec {
 #### 支持的命令
 
 - **help [command]**：显示帮助信息
-- **status [--memory|--block]**：显示内存池状态
+- **status [--memory|--block]**：显示内存池状态，包含最后修改时间信息
 - **alloc <user> "<content>"**：分配内存
 - **read <user>**：读取用户内容
 - **free <user>**：释放指定用户的内存
@@ -299,7 +301,7 @@ struct CommandSpec {
 ```cpp
 struct FileHeader {
     uint32_t magic;          // 魔数 "MEMP" (0x4D454D50)
-    uint32_t version;        // 版本号 (1)
+    uint32_t version;        // 版本号 (1: 基础版本, 2: 包含时间信息)
     size_t free_block_count; // 空闲块数量
     size_t user_info_count;  // 用户信息条目数
     uint64_t reserved[4];    // 预留字段
@@ -311,7 +313,12 @@ struct FileHeader {
 2. 元数据数组（256 个块）
 3. 使用状态位图（32 字节）
 4. 用户块信息映射
-5. 内存池数据（1MB）
+5. 用户最后修改时间映射（版本2新增）
+6. 内存池数据（1MB）
+
+**版本兼容性**：
+- 版本1：不包含用户最后修改时间信息
+- 版本2：包含用户最后修改时间信息，支持向后兼容（可加载版本1文件）
 
 #### 核心API
 
@@ -352,6 +359,9 @@ struct BlockMeta {
 };
 ```
 
+**时间信息管理**：
+系统还维护 `user_last_modified_time` 映射（`std::map<std::string, time_t>`），记录每个用户最后修改内存的时间戳。该信息在 `alloc`、`update` 操作时自动更新，并在 `status` 命令中显示。
+
 #### 内存池布局
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -367,6 +377,7 @@ struct BlockMeta {
 - **`meta_`**：`std::array<BlockMeta, 256>`，256 个块的元数据
 - **`used_map`**：`std::bitset<256>`，使用状态位图（32 字节）
 - **`user_block_info`**：`std::map<std::string, std::pair<size_t, size_t>>`，用户块映射表
+- **`user_last_modified_time`**：`std::map<std::string, time_t>`，记录每个用户最后修改内存的时间戳
 
 ### 3.2 核心算法
 
