@@ -6,22 +6,34 @@
 #include <sstream>
 
 static const std::vector<CommandSpec> kCmds = {
+    // 帮助命令
     {"help", "Show help information", "help [command]", {"help", "help blocks", "help allocs"}},
 
+    // 状态命令
     {"status",
      "Show server status (use --memory or --block)",
      "status [--memory|--block]",
      {"status", "status --memory", "status --block"}},
 
+    // 分配命令
     {"alloc",
      "Allocate memory for user with content",
      "alloc <user> \"<content>\"",
      {"alloc 192.168.1.100:54321 \"Hello World\"", "alloc client_1 \"string1\""}},
+
+    // 读取命令
     {"read",
      "Show content written by a user",
      "read <user>",
      {"read 192.168.1.100:54321", "read client_1"}},
+
+    // 紧凑命令
     {"compact", "Compact memory pool (merge free blocks)", "compact", {"compact"}},
+
+    // 重置命令
+    {"reset", "Reset memory pool (requires password confirmation)", "reset", {"reset"}},
+
+    // 退出命令
     {"quit", "Exit server console", "quit", {"quit"}}};
 
 static const CommandSpec* Find(const std::string& name) {
@@ -238,6 +250,28 @@ void HandleCommand(const std::vector<std::string>& tokens, SharedMemoryPool& smp
         std::cout << "Compacting memory pool...\n";
         smp.Compact();
         std::cout << "Memory pool compacted\n";
+        return;
+    }
+
+    // reset 命令
+    else if (cmd == "reset") {
+        std::cout
+            << "WARNING: This will clear all memory data and reset metadata to default state.\n";
+        std::cout << "Please enter password to confirm: ";
+        std::cout.flush();
+
+        std::string password;
+        if (!std::getline(std::cin, password)) {
+            std::cout << "Reset cancelled.\n";
+            return;
+        }
+
+        if (password == "confirm_reset") {
+            smp.Reset();
+            std::cout << "Memory pool has been reset to default state.\n";
+        } else {
+            std::cout << "Invalid password. Reset cancelled.\n";
+        }
         return;
     }
 
