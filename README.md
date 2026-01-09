@@ -24,36 +24,41 @@
 - 空间不足时自动触发紧凑操作
 - 返回分配的起始块 ID
 
-#### 3. 内存释放
-- `FreeByUser`：释放指定用户的所有内存块
-- `FreeByBlockId`：释放指定块 ID 的内存
+#### 3. 内存释放（`free` / `delete`）
+- `free <user>`：释放指定用户的所有内存块
+- `delete <user>`：释放指定用户的所有内存块（`free` 的别名）
 
-#### 4. 内存紧凑（`compact`）
+#### 4. 内容更新（`update`）
+- `update <user> "<new_content>"`：更新指定用户的内存内容
+- 如果新内容大小超过原分配，自动重新分配
+- 如果新内容大小不超过原分配，直接覆盖写入
+
+#### 5. 内存紧凑（`compact`）
 - 自动合并碎片，将已使用的块移动到内存池前端
 - 更新用户块信息映射关系
 
-#### 5. 状态查询（`status`）
+#### 6. 状态查询（`status`）
 - `status --memory`：显示内存池使用情况，按用户展示占用范围（格式：`block_000 - block_015`）
 - `status --block`：显示所有 256 个块的状态，包括占用客户端信息（格式：`block_000`, `block_001` 等）
 
-#### 6. 内容读取（`read`）
+#### 7. 内容读取（`read`）
 - `read <user>`：显示指定用户写入的内容
 - 直接从内存池读取，遇到 0 停止
 - 显示块范围、内容和大小
 
-#### 7. 命令行界面
+#### 8. 命令行界面
 - 交互式 REPL（Read-Eval-Print Loop）界面
 - 完整的帮助系统（`help` 命令）
 - 优雅的退出机制（`quit` / `exit`）
 
-#### 8. 数据持久化
+#### 9. 数据持久化
 - 自动保存内存池状态到 `memory_pool.dat` 文件
 - 支持程序正常退出（`quit`/`exit`）时保存
 - 支持异常退出（Ctrl+C、Ctrl+Z）时自动保存
 - 程序启动时自动加载之前保存的状态
 - 二进制文件格式，包含文件头、元数据、使用状态位图、用户块信息和内存池数据
 
-#### 9. 内存池重置（`reset`）
+#### 10. 内存池重置（`reset`）
 - `reset`：清空所有内存数据并将元数据重置为默认状态
 - 需要密码确认，防止误操作
 - 重置后内存池恢复到初始状态（所有块为空闲）
@@ -176,6 +181,13 @@ server> alloc client_1 "Hello World"
 
 # 读取用户内容
 server> read client_1
+
+# 释放用户内存
+server> free client_1
+server> delete client_1  # free 的别名
+
+# 更新用户内容
+server> update client_1 "Updated Content"
 
 # 紧凑内存
 server> compact

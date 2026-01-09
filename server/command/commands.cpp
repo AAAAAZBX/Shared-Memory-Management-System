@@ -4,6 +4,7 @@
 #include <iomanip>
 #include <algorithm>
 #include <sstream>
+#include <cstring>
 
 static const std::vector<CommandSpec> kCmds = {
     // 帮助命令
@@ -26,6 +27,22 @@ static const std::vector<CommandSpec> kCmds = {
      "Show content written by a user",
      "read <user>",
      {"read 192.168.1.100:54321", "read client_1"}},
+
+    // 释放命令
+    {"free",
+     "Free memory allocated by a user",
+     "free <user>",
+     {"free 192.168.1.100:54321", "free client_1"}},
+    {"delete",
+     "Delete memory allocated by a user (alias for free)",
+     "delete <user>",
+     {"delete 192.168.1.100:54321", "delete client_1"}},
+
+    // 更新命令
+    {"update",
+     "Update content for a user",
+     "update <user> \"<new_content>\"",
+     {"update 192.168.1.100:54321 \"New Content\"", "update client_1 \"Updated\""}},
 
     // 紧凑命令
     {"compact", "Compact memory pool (merge free blocks)", "compact", {"compact"}},
@@ -241,6 +258,101 @@ void HandleCommand(const std::vector<std::string>& tokens, SharedMemoryPool& smp
         } else {
             std::cout << "Content: \"" << content << "\"\n";
             std::cout << "Size: " << content.size() << " bytes\n";
+        }
+        return;
+    }
+
+    // free/delete 命令
+    else if (cmd == "free" || cmd == "delete") {
+        if (tokens.size() < 2) {
+            std::cout << "Usage: " << cmd << " <user>\n";
+            std::cout << "Example: " << cmd << " 192.168.1.100:54321\n";
+            return;
+        }
+
+        std::string user = tokens[1];
+        if (smp.FreeByUser(user)) {
+            std::cout << "Memory freed successfully for user '" << user << "'\n";
+        } else {
+            std::cout << "User '" << user << "' has no allocated memory.\n";
+        }
+        return;
+    }
+
+    // update 命令
+    else if (cmd == "update") {
+        if (tokens.size() < 3) {
+            std::cout << "Usage: update <user> \"<new_content>\"\n";
+            std::cout << "Example: update 192.168.1.100:54321 \"New Content\"\n";
+            return;
+        }
+
+        std::string user = tokens[1];
+        std::string newContent = ParseQuotedString(tokens, 2);
+
+        if (newContent.empty()) {
+            std::cout
+                << "Error: Invalid content format. Content must be enclosed in double quotes.\n";
+            std::cout << "Example: update " << user << " \"New Content\"\n";
+            return;
+        }
+
+        // 检查用户是否存在
+        const auto& userInfo = smp.GetUserBlockInfo();
+        auto it = userInfo.find(user);
+        if (it == userInfo.end()) {
+            std::cout << "Error: User '" << user << "' has no allocated memory.\n";
+            std::cout << "Use 'alloc' command to allocate memory first.\n";
+            return;
+        }
+
+        // 获取用户当前的块信息
+        size_t startBlock = it->second.first;
+        size_t currentBlockCount = it->second.second;
+        size_t currentSize = currentBlockCount * SharedMemoryPool::kBlockSize;
+
+        // 计算新内容需要的块数
+        size_t newSize = newContent.size();
+        size_t requiredBlockCount =
+            (newSize + SharedMemoryPool::kBlockSize - 1) / SharedMemoryPool::kBlockSize;
+
+        // 如果新内容大小超过原分配，需要重新分配
+        if (newSize > currentSize) {
+            // 先释放原内存
+            smp.FreeByUser(user);
+            // 重新分配
+            int blockId = smp.AllocateBlock(user, newContent.data(), newSize);
+            if (blockId >= 0) {
+                std::cout << "Content updated successfully. New content stored at block " << blockId
+                          << "\n";
+            } else {
+                std::cout << "Update failed. Insufficient memory for new content.\n";
+            }
+        } else {
+            // 新内容大小不超过原分配，直接覆盖写入
+            uint8_t* poolData = smp.GetPoolData();
+            size_t bytesWritten = 0;
+            for (size_t i = 0; i < currentBlockCount; ++i) {
+                size_t blockId = startBlock + i;
+                size_t bytesToWrite =
+                    std::min(SharedMemoryPool::kBlockSize, newSize - bytesWritten);
+
+                // 写入新数据
+                std::memcpy(poolData + blockId * SharedMemoryPool::kBlockSize,
+                            newContent.data() + bytesWritten, bytesToWrite);
+
+                // 如果块没有写满，剩余部分清零
+                if (bytesToWrite < SharedMemoryPool::kBlockSize) {
+                    std::memset(poolData + blockId * SharedMemoryPool::kBlockSize + bytesToWrite, 0,
+                                SharedMemoryPool::kBlockSize - bytesToWrite);
+                }
+
+                bytesWritten += bytesToWrite;
+                if (bytesWritten >= newSize) {
+                    break;
+                }
+            }
+            std::cout << "Content updated successfully.\n";
         }
         return;
     }

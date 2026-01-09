@@ -1,0 +1,482 @@
+# Shared Memory Management System - 技术文档
+
+## 文档目录
+
+- [Shared Memory Management System - 技术文档](#shared-memory-management-system---技术文档)
+  - [文档目录](#文档目录)
+  - [0. 项目概述](#0-项目概述)
+    - [0.1 项目简介](#01-项目简介)
+      - [核心特性](#核心特性)
+      - [技术栈](#技术栈)
+      - [项目状态](#项目状态)
+    - [0.2 目录结构](#02-目录结构)
+    - [0.3 文件功能说明](#03-文件功能说明)
+      - [服务器端核心文件](#服务器端核心文件)
+      - [客户端文件（开发中）](#客户端文件开发中)
+  - [1. 系统架构](#1-系统架构)
+    - [1.1 整体架构](#11-整体架构)
+    - [1.2 模块划分](#12-模块划分)
+      - [内存池模块 (`shared_memory_pool`)](#内存池模块-shared_memory_pool)
+      - [命令处理模块 (`command`)](#命令处理模块-command)
+      - [持久化模块 (`persistence`)](#持久化模块-persistence)
+      - [网络模块 (`network`)](#网络模块-network)
+    - [1.3 数据流](#13-数据流)
+      - [命令执行流程](#命令执行流程)
+      - [内存分配流程](#内存分配流程)
+      - [持久化流程](#持久化流程)
+  - [2. 核心模块与API](#2-核心模块与api)
+    - [2.1 内存池模块](#21-内存池模块)
+      - [核心常量](#核心常量)
+      - [关键API](#关键api)
+      - [实现要点](#实现要点)
+    - [2.2 命令处理模块](#22-命令处理模块)
+      - [命令定义结构](#命令定义结构)
+      - [支持的命令](#支持的命令)
+      - [核心函数](#核心函数)
+    - [2.3 持久化模块](#23-持久化模块)
+      - [文件格式](#文件格式)
+      - [核心API](#核心api)
+    - [2.4 网络模块](#24-网络模块)
+      - [TCP 服务器设计（开发中）](#tcp-服务器设计开发中)
+  - [3. 数据结构与算法](#3-数据结构与算法)
+    - [3.1 数据结构](#31-数据结构)
+      - [BlockMeta 结构](#blockmeta-结构)
+      - [内存池布局](#内存池布局)
+      - [核心数据结构](#核心数据结构)
+    - [3.2 核心算法](#32-核心算法)
+      - [内存分配算法](#内存分配算法)
+      - [内存紧凑算法](#内存紧凑算法)
+      - [位图优化](#位图优化)
+  - [4. 开发指南](#4-开发指南)
+    - [4.1 代码规范](#41-代码规范)
+      - [命名规范](#命名规范)
+      - [代码格式](#代码格式)
+    - [4.2 扩展开发](#42-扩展开发)
+      - [添加新命令](#添加新命令)
+      - [修改内存池大小](#修改内存池大小)
+      - [添加持久化字段](#添加持久化字段)
+  - [附录](#附录)
+    - [性能指标](#性能指标)
+    - [常见问题](#常见问题)
+
+---
+
+## 0. 项目概述
+
+### 0.1 项目简介
+
+**Shared Memory Management System** 是一个基于 C++17 实现的共享内存管理系统，采用固定块大小（4KB）的内存池管理策略。
+
+#### 核心特性
+
+- **固定块管理**：将内存池划分为 256 个 4KB 的固定大小块（当前配置为 1MB 内存池）
+- **连续块分配**：支持跨多个块的数据存储，自动计算所需块数
+- **内存紧凑**：当找不到连续空闲块但总空间足够时，自动进行内存紧凑，合并碎片
+- **数据持久化**：支持程序退出时自动保存状态，启动时自动恢复
+- **命令行界面**：提供交互式 REPL 界面，支持多种命令操作
+
+#### 技术栈
+
+- **语言**：C++17
+- **编译器**：g++ (MinGW-w64 / MSYS2)
+- **标准库**：STL（`vector`, `map`, `bitset`, `array`）
+- **平台**：Windows
+
+#### 项目状态
+
+- ✅ **已完成**：内存池核心、命令处理、数据持久化
+- 🚧 **开发中**：TCP 网络模块、客户端程序
+
+### 0.2 目录结构
+
+```
+Shared-Memory-Manage-System/
+├── server/                          # 服务器端程序
+│   ├── main.cpp                    # 服务器主程序入口
+│   ├── command/                    # 命令处理模块
+│   │   ├── commands.h              # 命令处理声明
+│   │   └── commands.cpp            # 命令处理实现
+│   ├── shared_memory_pool/         # 内存池核心模块
+│   │   ├── shared_memory_pool.h   # 内存池类声明
+│   │   └── shared_memory_pool.cpp # 内存池类实现
+│   ├── persistence/                # 持久化模块
+│   │   ├── persistence.h          # 持久化接口声明
+│   │   └── persistence.cpp        # 持久化实现
+│   ├── network/                    # 网络模块（开发中）
+│   │   ├── tcp_server.h           # TCP 服务器声明
+│   │   ├── tcp_server.cpp         # TCP 服务器实现
+│   │   ├── protocol.h             # 网络协议定义
+│   │   └── protocol.cpp           # 协议编解码实现
+│   ├── run.bat                     # 编译运行脚本
+│   └── build.bat                   # 编译脚本
+├── client/                         # 客户端程序（开发中）
+│   ├── main.cpp                   # 客户端主程序
+│   ├── network/                    # 客户端网络模块
+│   │   ├── tcp_client.h          # TCP 客户端声明
+│   │   └── tcp_client.cpp        # TCP 客户端实现
+│   └── protocol.h                 # 协议定义（与服务器共享）
+├── README.md                       # 项目说明文档（面向用户）
+├── doc.md                          # 技术文档（面向开发者）
+└── details.md                      # 项目需求文档
+```
+
+### 0.3 文件功能说明
+
+#### 服务器端核心文件
+
+- **`main.cpp`**：程序入口，初始化内存池，启动 REPL 循环，处理信号
+- **`shared_memory_pool/`**：内存池核心，管理 1MB 内存空间，提供分配/释放/紧凑功能
+- **`command/`**：命令处理，解析用户命令，调用内存池接口
+- **`persistence/`**：持久化，保存/加载内存池状态到文件
+- **`network/`**：网络模块（开发中），TCP 服务器实现
+
+#### 客户端文件（开发中）
+
+- **`main.cpp`**：客户端主程序
+- **`network/tcp_client`**：TCP 客户端实现
+- **`protocol.h`**：网络协议定义
+
+---
+
+## 1. 系统架构
+
+### 1.1 整体架构
+
+本系统采用分层模块化设计：
+
+```
+┌─────────────────────────────────────────┐
+│         用户交互层 (REPL/Network)        │
+├─────────────────────────────────────────┤
+│         命令处理层 (Command Handler)     │
+├─────────────────────────────────────────┤
+│         业务逻辑层 (Memory Pool)         │
+├─────────────────────────────────────────┤
+│         持久化层 (Persistence)           │
+└─────────────────────────────────────────┘
+```
+
+**设计原则**：
+- **单一职责**：每个模块只负责一个功能领域
+- **低耦合**：模块间通过接口交互
+- **高内聚**：相关功能集中在同一模块
+
+### 1.2 模块划分
+
+#### 内存池模块 (`shared_memory_pool`)
+- **职责**：管理固定大小的内存块分配
+- **核心类**：`SharedMemoryPool`
+- **数据结构**：`pool_`（1MB内存）、`meta_`（元数据数组）、`used_map`（位图）、`user_block_info`（用户映射表）
+
+#### 命令处理模块 (`command`)
+- **职责**：解析和执行用户命令
+- **核心函数**：`HandleCommand()`
+- **支持命令**：help、status、alloc、read、free/delete、update、compact、reset、quit
+
+#### 持久化模块 (`persistence`)
+- **职责**：序列化/反序列化内存池状态
+- **核心函数**：`Persistence::Save()` / `Load()`
+- **文件格式**：二进制格式，包含文件头、元数据、位图、用户信息、内存池数据
+
+#### 网络模块 (`network`)
+- **职责**：TCP 服务器，处理客户端连接（开发中）
+- **核心类**：`TCPServer`
+- **协议**：自定义二进制协议
+
+### 1.3 数据流
+
+#### 命令执行流程
+```
+用户输入 → 命令解析 → 参数验证 → 调用内存池接口 → 返回结果 → 格式化输出
+```
+
+#### 内存分配流程
+```
+AllocateBlock() → 计算所需块数 → 查找连续空闲块 → 
+[未找到] → Compact() → 重新查找 → 
+[找到] → 写入数据 → 更新元数据 → 返回块ID
+```
+
+#### 持久化流程
+```
+保存：程序退出 → SignalHandler → Persistence::Save() → 序列化所有数据 → 写入文件
+加载：程序启动 → Persistence::Load() → 读取文件 → 验证格式 → 反序列化 → 恢复状态
+```
+
+---
+
+## 2. 核心模块与API
+
+### 2.1 内存池模块
+
+#### 核心常量
+```cpp
+static constexpr size_t kPoolSize = 1024 * 1024;    // 1MB
+static constexpr size_t kBlockSize = 4096;          // 4KB
+static constexpr size_t kBlockCount = 256;          // 256 块
+```
+
+#### 关键API
+
+**初始化**
+- `bool Init()`：分配 1MB 连续内存，初始化所有元数据
+- `void Reset()`：清空所有数据，恢复到初始状态
+
+**内存分配**
+- `int AllocateBlock(const std::string& user, const void* data, size_t dataSize)`
+  - 为指定用户分配内存并写入数据
+  - 返回：起始块 ID（成功）或 -1（失败）
+  - 自动计算所需块数，空间不足时触发紧凑
+
+**内存释放**
+- `bool FreeByUser(const std::string& user)`：释放指定用户的所有内存
+- `bool FreeByBlockId(size_t blockId)`：释放指定块的内存
+
+**内容更新**
+- 通过 `update` 命令实现，支持两种模式：
+  - 新内容大小 ≤ 原分配：直接覆盖写入，剩余部分清零
+  - 新内容大小 > 原分配：先释放原内存，再重新分配
+
+**查询接口**
+- `const BlockMeta& GetMeta(size_t blockId)`：获取块的元数据
+- `const std::map<std::string, std::pair<size_t, size_t>>& GetUserBlockInfo()`：获取用户块映射表
+- `std::string GetUserContentAsString(const std::string& user)`：读取用户内容（遇到0停止）
+
+**工具方法**
+- `void Compact()`：紧凑内存，合并碎片，将所有已使用的块移动到前端
+
+#### 实现要点
+
+- **分配策略**：首次适配算法，找不到连续块时自动紧凑
+- **紧凑算法**：O(n) 时间复杂度，原地操作
+- **时间复杂度**：分配 O(n)，释放 O(1)，查询 O(1)
+
+### 2.2 命令处理模块
+
+#### 命令定义结构
+```cpp
+struct CommandSpec {
+    std::string name;                    // 命令名称
+    std::string summary;                 // 简要说明
+    std::string usage;                   // 使用格式
+    std::vector<std::string> examples;   // 示例
+};
+```
+
+#### 支持的命令
+
+- **help [command]**：显示帮助信息
+- **status [--memory|--block]**：显示内存池状态
+- **alloc <user> "<content>"**：分配内存
+- **read <user>**：读取用户内容
+- **free <user>**：释放指定用户的内存
+- **delete <user>**：释放指定用户的内存（`free` 的别名）
+- **update <user> "<new_content>"**：更新用户内容
+- **compact**：紧凑内存
+- **reset**：重置内存池（需要密码确认）
+- **quit/exit**：退出程序
+
+#### 核心函数
+
+**void HandleCommand(const std::vector<std::string>& tokens, SharedMemoryPool& smp)**
+- 解析命令和参数
+- 调用相应的内存池接口
+- 格式化输出结果
+
+### 2.3 持久化模块
+
+#### 文件格式
+
+**文件头结构**（48 字节）：
+```cpp
+struct FileHeader {
+    uint32_t magic;          // 魔数 "MEMP" (0x4D454D50)
+    uint32_t version;        // 版本号 (1)
+    size_t free_block_count; // 空闲块数量
+    size_t user_info_count;  // 用户信息条目数
+    uint64_t reserved[4];    // 预留字段
+};
+```
+
+**文件内容顺序**：
+1. 文件头（48 字节）
+2. 元数据数组（256 个块）
+3. 使用状态位图（32 字节）
+4. 用户块信息映射
+5. 内存池数据（1MB）
+
+#### 核心API
+
+**bool Persistence::Save(const SharedMemoryPool& smp, const std::string& filename)**
+- 序列化内存池状态到文件
+- 返回：true（成功）或 false（失败）
+
+**bool Persistence::Load(SharedMemoryPool& smp, const std::string& filename)**
+- 从文件加载内存池状态
+- 返回：true（成功）或 false（失败/文件不存在）
+
+### 2.4 网络模块
+
+#### TCP 服务器设计（开发中）
+
+**核心功能**：
+- 监听指定端口
+- 接受客户端连接
+- 为每个连接创建处理线程
+- 从连接获取客户端 IP:Port 作为用户标识
+
+**网络协议**：
+- 请求格式：`[命令类型: 1字节] [数据长度: 4字节] [数据内容: N字节]`
+- 响应格式：`[状态码: 1字节] [数据长度: 4字节] [响应数据: N字节]`
+- 命令类型：ALLOC(0x01)、UPDATE(0x02)、DELETE(0x03)、READ(0x04)
+
+---
+
+## 3. 数据结构与算法
+
+### 3.1 数据结构
+
+#### BlockMeta 结构
+```cpp
+struct BlockMeta {
+    bool used = false;        // 是否被使用
+    std::string user = "";    // 用户标识（IP:端口号）
+};
+```
+
+#### 内存池布局
+```
+┌─────────────────────────────────────────────────────────┐
+│                    Memory Pool (1MB)                     │
+├─────────────────────────────────────────────────────────┤
+│ Block 0 (4KB) │ Block 1 (4KB) │ ... │ Block 255 (4KB)  │
+└─────────────────────────────────────────────────────────┘
+```
+
+#### 核心数据结构
+
+- **`pool_`**：`std::vector<uint8_t>`，1MB 连续内存空间
+- **`meta_`**：`std::array<BlockMeta, 256>`，256 个块的元数据
+- **`used_map`**：`std::bitset<256>`，使用状态位图（32 字节）
+- **`user_block_info`**：`std::map<std::string, std::pair<size_t, size_t>>`，用户块映射表
+
+### 3.2 核心算法
+
+#### 内存分配算法
+
+**流程**：
+1. 计算所需块数：`ceil(dataSize / 4KB)`
+2. 检查总空间是否足够
+3. 查找连续空闲块（首次适配）
+4. 如果未找到但总空间足够，执行紧凑后重新查找
+5. 写入数据并更新元数据和映射表
+
+**首次适配算法**：
+```cpp
+int FindContinuousFreeBlock(blockCount) {
+    for (i = 0; i < kBlockCount; i++) {
+        if (used_map[i]) continue
+        // 检查从 i 开始的连续空闲块
+        j = i
+        while (j < kBlockCount && !used_map[j]) j++
+        if (j - i >= blockCount) return i
+        i = j - 1  // 跳过已检查的块
+    }
+    return -1
+}
+```
+
+**时间复杂度**：O(n)，n 为块数
+
+#### 内存紧凑算法
+
+**流程**：
+1. 找到第一个空闲块位置 `freePos`
+2. 从 `freePos` 开始向后遍历
+3. 如果遇到已使用的块，将其移动到 `freePos`
+4. 更新元数据、位图和用户映射表
+5. `freePos++`，继续处理
+
+**时间复杂度**：O(n)  
+**空间复杂度**：O(1)，原地操作
+
+#### 位图优化
+
+- 使用 `std::bitset<256>` 存储使用状态
+- 查询/设置：O(1)
+- 内存占用：32 字节
+- 维护 `free_block_count` 变量，O(1) 时间判断是否有足够空间
+
+---
+
+## 4. 开发指南
+
+### 4.1 代码规范
+
+#### 命名规范
+- **类名**：PascalCase，如 `SharedMemoryPool`
+- **函数名**：PascalCase，如 `AllocateBlock()`
+- **变量名**：snake_case，如 `free_block_count`
+- **常量名**：k + PascalCase，如 `kPoolSize`
+- **私有成员**：snake_case + 下划线后缀，如 `pool_`
+
+#### 代码格式
+- 使用 `clang-format` 格式化代码
+- K&R 风格（左大括号不换行）
+- 4 空格缩进
+
+### 4.2 扩展开发
+
+#### 添加新命令
+1. 在 `commands.cpp` 的 `kCmds` 中添加命令定义
+2. 在 `HandleCommand()` 中添加处理逻辑
+3. 更新帮助信息
+
+#### 修改内存池大小
+在 `shared_memory_pool.h` 中修改常量：
+```cpp
+static constexpr size_t kPoolSize = 1024 * 1024 * 1024;  // 1GB
+```
+注意：修改后需要更新 `kBlockCount` 的计算。
+
+#### 添加持久化字段
+1. 在 `FileHeader` 中添加字段
+2. 更新文件版本号
+3. 在 `Save()` 和 `Load()` 中处理新字段
+4. 处理版本兼容性
+
+---
+
+## 附录
+
+### 性能指标
+
+| 操作 | 时间复杂度 | 空间复杂度 |
+| ---- | ---------- | ---------- |
+| 分配 | O(n)       | O(1)       |
+| 释放 | O(1)       | O(1)       |
+| 紧凑 | O(n)       | O(1)       |
+| 查询 | O(1)       | O(1)       |
+
+**空间占用**：
+- 内存池：1MB（固定）
+- 元数据：~8KB
+- 位图：32 字节
+- 用户映射表：O(m)，m 为用户数
+- 总计：~1.01MB
+
+### 常见问题
+
+**Q: 为什么内存池大小是 1MB？**  
+A: 当前为演示版本，可根据需求修改 `kPoolSize` 常量。
+
+**Q: 持久化文件损坏怎么办？**  
+A: 程序会自动检测文件格式，如果损坏会使用新内存池。可以删除损坏的文件重新开始。
+
+**Q: 如何实现多客户端并发访问？**  
+A: 需要为 `SharedMemoryPool` 的操作添加互斥锁（`std::mutex`），确保线程安全。
+
+---
+
+**文档版本**：v1.0  
+**最后更新**：2026年
