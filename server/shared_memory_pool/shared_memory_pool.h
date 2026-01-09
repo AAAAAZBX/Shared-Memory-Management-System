@@ -14,9 +14,8 @@ class SharedMemoryPool {
     static constexpr size_t kBlockCount = kPoolSize / kBlockSize; // 256
 
     struct BlockMeta {
-        bool used = false;        // 是否被使用
-        std::string user = "";    // 用户(IP:端口号)
-        std::string content = ""; // 内容
+        bool used = false;     // 是否被使用
+        std::string user = ""; // 用户(IP:端口号)
     };
 
     bool Init();  // 分配 1MB
@@ -24,14 +23,16 @@ class SharedMemoryPool {
 
     // 元信息操作
     const BlockMeta& GetMeta(size_t blockId) const;
-    bool SetMeta(size_t blockId, const std::string& user, const std::string& content);
+    bool SetMeta(size_t blockId, const std::string& user);
+    // 用于加载时直接设置元数据（不检查 used_map，不修改 free_block_count）
+    void SetMetaForLoad(size_t blockId, const std::string& user);
     const std::map<std::string, std::pair<size_t, size_t>>& GetUserBlockInfo() const;
 
     // 内存分配相关
     // 暂定一个用户只能申请一块内存
     int FindContinuousFreeBlock(size_t blockCount); // 查找连续的空闲块
     void Compact();                                 // 紧凑内存
-    int AllocateBlock(const std::string& user, const std::string& content, const void* data,
+    int AllocateBlock(const std::string& user, const void* data,
                       size_t dataSize); // 分配内存
 
     // 内存释放相关
@@ -65,6 +66,9 @@ class SharedMemoryPool {
     }
     void SetFreeBlockCount(size_t count) {
         free_block_count = count;
+    }
+    void SetUserBlockInfo(const std::map<std::string, std::pair<size_t, size_t>>& info) {
+        user_block_info = info;
     }
 
   private:

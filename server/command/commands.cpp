@@ -127,15 +127,29 @@ void HandleCommand(const std::vector<std::string>& tokens, SharedMemoryPool& smp
             std::cout << "Memory Pool Status:\n";
             std::cout << "|          range          |    Occupied Client    |\n";
             std::cout << "|-------------------------|-----------------------|\n";
-            for (const auto& entry : smp.GetUserBlockInfo()) {
+
+            // 使用指针避免复制数据，按起始 block 排序
+            const auto& userInfo = smp.GetUserBlockInfo();
+            std::vector<const std::pair<const std::string, std::pair<size_t, size_t>>*>
+                sortedEntries;
+            sortedEntries.reserve(userInfo.size());
+            for (const auto& entry : userInfo) {
+                sortedEntries.push_back(&entry);
+            }
+            // 按照起始 block ID 排序
+            std::sort(sortedEntries.begin(), sortedEntries.end(), [](const auto* a, const auto* b) {
+                return a->second.first < b->second.first;
+            });
+
+            for (const auto* entry : sortedEntries) {
                 std::ostringstream rangeStream;
-                rangeStream << "block_" << std::setfill('0') << std::setw(3) << entry.second.first
+                rangeStream << "block_" << std::setfill('0') << std::setw(3) << entry->second.first
                             << " - "
                             << "block_" << std::setfill('0') << std::setw(3)
-                            << (entry.second.first + entry.second.second - 1);
+                            << (entry->second.first + entry->second.second - 1);
                 std::string rangeStr = rangeStream.str();
                 std::cout << "| " << std::left << std::setw(23) << std::setfill(' ') << rangeStr
-                          << " | " << std::left << std::setw(21) << entry.first << " |\n";
+                          << " | " << std::left << std::setw(21) << entry->first << " |\n";
             }
         } else if (mode == "--block") {
             // 原来的 blocks 命令内容
@@ -175,9 +189,8 @@ void HandleCommand(const std::vector<std::string>& tokens, SharedMemoryPool& smp
             return;
         }
 
-        // 使用 content 作为标识名称，content 本身作为数据
-        // 注意：这里 content 既作为标识也作为数据内容
-        int blockId = smp.AllocateBlock(user, content, content.data(), content.size());
+        // 将 content 作为数据写入内存池
+        int blockId = smp.AllocateBlock(user, content.data(), content.size());
 
         if (blockId >= 0) {
             std::cout << "Allocation successful. Content stored at block " << blockId << "\n";

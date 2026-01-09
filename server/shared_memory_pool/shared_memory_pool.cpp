@@ -25,17 +25,22 @@ void SharedMemoryPool::Reset() {
     user_block_info.clear();
 }
 
-bool SharedMemoryPool::SetMeta(size_t blockId, const std::string& user,
-                               const std::string& content) {
+bool SharedMemoryPool::SetMeta(size_t blockId, const std::string& user) {
     if (used_map[blockId])
         return false;
     auto& m = meta_[blockId];
     m.used = true;
     m.user = user;
-    m.content = content;
     free_block_count--;
     used_map.set(blockId, true);
     return true;
+}
+
+void SharedMemoryPool::SetMetaForLoad(size_t blockId, const std::string& user) {
+    auto& m = meta_[blockId];
+    m.used = true;
+    m.user = user;
+    // 不修改 free_block_count 和 used_map，因为这些已经在加载时设置好了
 }
 
 const std::map<std::string, std::pair<size_t, size_t>>& SharedMemoryPool::GetUserBlockInfo() const {
@@ -89,8 +94,7 @@ void SharedMemoryPool::Compact() {
 }
 
 // 分配内存
-int SharedMemoryPool::AllocateBlock(const std::string& user, const std::string& content,
-                                    const void* data, size_t dataSize) {
+int SharedMemoryPool::AllocateBlock(const std::string& user, const void* data, size_t dataSize) {
     if (dataSize == 0 || user.empty() || data == nullptr) {
         return -1;
     }
@@ -136,7 +140,6 @@ int SharedMemoryPool::AllocateBlock(const std::string& user, const std::string& 
         // 设置元数据
         meta_[blockId].used = true;
         meta_[blockId].user = user;
-        meta_[blockId].content = content;
         used_map.set(blockId, true);
         free_block_count--;
 

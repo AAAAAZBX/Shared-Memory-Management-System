@@ -118,7 +118,8 @@
     "typeinfo": "cpp",
     "variant": "cpp",
     "bitset": "cpp",
-    "map": "cpp"
+    "map": "cpp",
+    "fstream": "cpp"
   },
   "[cpp]": {
     "editor.defaultFormatter": "ms-vscode.cpptools",

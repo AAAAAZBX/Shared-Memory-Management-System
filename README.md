@@ -33,10 +33,15 @@
 - 更新用户块信息映射关系
 
 #### 5. 状态查询（`status`）
-- `status --memory`：显示内存池使用情况，按用户展示占用范围
-- `status --block`：显示所有 256 个块的状态，包括占用客户端信息
+- `status --memory`：显示内存池使用情况，按用户展示占用范围（格式：`block_000 - block_015`）
+- `status --block`：显示所有 256 个块的状态，包括占用客户端信息（格式：`block_000`, `block_001` 等）
 
-#### 6. 命令行界面
+#### 6. 内容读取（`read`）
+- `read <user>`：显示指定用户写入的内容
+- 直接从内存池读取，遇到 0 停止
+- 显示块范围、内容和大小
+
+#### 7. 命令行界面
 - 交互式 REPL（Read-Eval-Print Loop）界面
 - 完整的帮助系统（`help` 命令）
 - 优雅的退出机制（`quit` / `exit`）
@@ -71,6 +76,61 @@ struct BlockMeta {
 └─────────────────────────────────────────┘
 ```
 
+### 数据持久化文件格式
+
+程序退出时会自动将内存池状态保存到 `memory_pool.dat` 文件中，启动时会自动加载。文件格式如下：
+
+#### 文件结构（按顺序）
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ 1. FileHeader (文件头)                                    │
+│    - magic: uint32_t (0x4D454D50, "MEMP")                │
+│    - version: uint32_t (当前版本: 1)                      │
+│    - free_block_count: size_t (空闲块数量)                │
+│    - user_info_count: size_t (用户信息条目数)             │
+│    - reserved: uint64_t[4] (预留字段)                    │
+├─────────────────────────────────────────────────────────┤
+│ 2. BlockMeta Array (元数据数组，256个块)                  │
+│    对每个块 i (0-255):                                    │
+│    - used: bool (是否被使用)                              │
+│    - userLen: size_t (用户标识长度)                      │
+│    - user: char[userLen] (用户标识字符串，如果 userLen>0) │
+│    - contentLen: size_t (内容标识长度)                   │
+│    - content: char[contentLen] (内容标识，如果 contentLen>0)│
+├─────────────────────────────────────────────────────────┤
+│ 3. Used Map (使用状态位图)                                │
+│    - bitsetBytes: uint8_t[(256+7)/8] (32字节)            │
+│      (每个位表示对应块的使用状态)                          │
+├─────────────────────────────────────────────────────────┤
+│ 4. User Block Info (用户块信息映射)                       │
+│    对每个用户条目:                                        │
+│    - keyLen: size_t (用户标识长度)                       │
+│    - key: char[keyLen] (用户标识字符串)                  │
+│    - startBlock: size_t (起始块ID)                       │
+│    - blockCount: size_t (块数量)                         │
+├─────────────────────────────────────────────────────────┤
+│ 5. Pool Data (内存池数据)                                 │
+│    - pool_: uint8_t[1048576] (1MB 原始数据)              │
+└─────────────────────────────────────────────────────────┘
+```
+
+#### 文件格式说明
+
+- **文件类型**：二进制文件
+- **字节序**：小端序（Little-Endian，Windows 默认）
+- **魔数**：`0x4D454D50`（ASCII: "MEMP"），用于文件格式验证
+- **版本号**：当前为 `1`，用于未来格式升级兼容
+
+#### 文件大小估算
+
+- 文件头：`sizeof(FileHeader)` ≈ 48 字节
+- 元数据数组：256 × (1 + 8 + 可变字符串长度) ≈ 2-10 KB（取决于字符串长度）
+- Used Map：32 字节
+- User Block Info：可变（取决于用户数量）
+- Pool Data：1,048,576 字节（1MB）
+- **总大小**：约 1.05-1.06 MB
+
 ## 使用方法
 
 ### 编译与运行
@@ -84,7 +144,7 @@ cd server
 #### 方式二：手动编译
 ```bash
 cd server
-g++ -std=c++17 -Wall main.cpp commands.cpp shared_memory_pool.cpp -o main.exe
+g++ -std=c++17 -Wall main.cpp command/commands.cpp shared_memory_pool/shared_memory_pool.cpp persistence/persistence.cpp -o main.exe
 .\main.exe
 ```
 
@@ -99,8 +159,11 @@ server> help status
 server> status --memory
 server> status --block
 
-# 分配内存（当前已注释，待 TCP 功能实现后启用）
-# server> alloc client_1 "Hello World"
+# 分配内存
+server> alloc client_1 "Hello World"
+
+# 读取用户内容
+server> read client_1
 
 # 紧凑内存
 server> compact
@@ -114,20 +177,28 @@ server> quit
 **`status --memory` 输出：**
 ```
 Memory Pool Status:
-| range   | Occupied Client     |
-| ------- | ------------------- |
-| 0 - 15  | 192.168.1.100:54321 |
-| 16 - 31 | client_2            |
+|          range          |    Occupied Client    |
+|-------------------------|-----------------------|
+| block_000 - block_015  | 192.168.1.100:54321   |
+| block_016 - block_031  | client_2              |
 ```
 
 **`status --block` 输出：**
 ```
 Block Pool Status:
-| ID        | Occupied Client     |
-| --------- | ------------------- |
+|     ID    |   Occupied Client   |
+|-----------|---------------------|
 | block_000 | 192.168.1.100:54321 |
 | block_001 | 192.168.1.100:54321 |
-| block_002 | -                   |
+| block_002 | -                    |
+```
+
+**`read <user>` 输出：**
+```
+User: client_1
+Blocks: 0-0
+Content: "Hello World"
+Size: 11 bytes
 ```
 
 ## 项目结构
@@ -135,15 +206,20 @@ Block Pool Status:
 ```
 Shared-Memory-Manage-System/
 ├── server/
-│   ├── main.cpp                 # 主程序入口，REPL 循环
-│   ├── shared_memory_pool.h     # 内存池类声明
-│   ├── shared_memory_pool.cpp   # 内存池实现
-│   ├── commands.h               # 命令处理声明
-│   ├── commands.cpp             # 命令处理实现
-│   ├── run.bat                  # 编译运行脚本
-│   └── build.bat                # 编译脚本
-├── details.md                   # 项目需求文档
-└── README.md                    # 本文件
+│   ├── main.cpp                          # 主程序入口，REPL 循环
+│   ├── command/
+│   │   ├── commands.h                    # 命令处理声明
+│   │   └── commands.cpp                  # 命令处理实现
+│   ├── shared_memory_pool/
+│   │   ├── shared_memory_pool.h          # 内存池类声明
+│   │   └── shared_memory_pool.cpp        # 内存池实现
+│   ├── persistence/
+│   │   ├── persistence.h                 # 持久化模块声明
+│   │   └── persistence.cpp               # 持久化模块实现（开发中）
+│   ├── run.bat                           # 编译运行脚本
+│   └── build.bat                         # 编译脚本
+├── details.md                            # 项目需求文档
+└── README.md                             # 本文件
 ```
 
 ## 技术栈
@@ -160,21 +236,7 @@ Shared-Memory-Manage-System/
 - ✅ 内存安全（使用 STL 容器，避免裸指针）
 - ✅ 错误处理（返回值检查，异常安全）
 - ✅ 代码格式化（clang-format，K&R 风格）
-
-## 待实现功能
-
-### 短期目标
-- [ ] TCP 服务器功能（监听端口，接受客户端连接）
-- [ ] 客户端程序（`client.exe`）
-- [ ] 网络协议实现（请求/响应格式）
-- [ ] 数据持久化（服务器关闭时保存状态，启动时恢复）
-
-### 长期目标
-- [ ] 支持多客户端并发访问
-- [ ] 内存池大小可配置（当前固定 1MB）
-- [ ] 性能优化（减少内存拷贝，优化紧凑算法）
-- [ ] 日志系统
-- [ ] 单元测试
+- ✅ 模块化设计（功能分离到不同目录）
 
 ## 开发进度
 
@@ -186,9 +248,25 @@ Shared-Memory-Manage-System/
 | 内存紧凑   | ✅ 完成   | 100%   |
 | 命令行界面 | ✅ 完成   | 100%   |
 | 状态查询   | ✅ 完成   | 100%   |
+| 内容读取   | ✅ 完成   | 100%   |
+| 数据持久化 | 🚧 开发中 | 60%    |
 | TCP 服务器 | ⏳ 待实现 | 0%     |
 | 客户端程序 | ⏳ 待实现 | 0%     |
-| 数据持久化 | ⏳ 待实现 | 0%     |
+
+## 待实现功能
+
+### 短期目标
+- [ ] 完成数据持久化功能（保存/加载内存池状态）
+- [ ] TCP 服务器功能（监听端口，接受客户端连接）
+- [ ] 客户端程序（`client.exe`）
+- [ ] 网络协议实现（请求/响应格式）
+
+### 长期目标
+- [ ] 支持多客户端并发访问
+- [ ] 内存池大小可配置（当前固定 1MB）
+- [ ] 性能优化（减少内存拷贝，优化紧凑算法）
+- [ ] 日志系统
+- [ ] 单元测试
 
 ## 性能指标
 
@@ -198,17 +276,25 @@ Shared-Memory-Manage-System/
   - 分配：O(n) 最坏情况，n 为块数
   - 紧凑：O(n)
   - 释放：O(1)
+  - 查询：O(1) 到 O(n)
 
 ## 注意事项
 
 1. 当前版本为服务器端核心功能实现，TCP 网络功能尚未集成
-2. `alloc` 命令已实现但当前被注释，等待网络功能完成后启用
-3. 内存池大小可在 `shared_memory_pool.h` 中通过 `kPoolSize` 常量调整
+2. 数据持久化功能正在开发中，预计将支持程序退出时自动保存状态
+3. 内存池大小可在 `shared_memory_pool/shared_memory_pool.h` 中通过 `kPoolSize` 常量调整
 4. 建议使用支持 C++17 的编译器（g++ 7.0+ 或 MSVC 2017+）
+5. 块 ID 显示格式为 3 位数字，不足 3 位用 0 填充（如 `block_000`, `block_030`）
 
 ## 更新日志
 
-### v0.1.0 (当前版本)
+### v0.2.0 (当前版本)
+- ✅ 重构项目结构，采用模块化设计
+- ✅ 实现 `read` 命令，支持读取用户内容
+- ✅ 优化状态显示格式（块 ID 3 位数字格式）
+- 🚧 开始实现数据持久化功能
+
+### v0.1.0
 - ✅ 实现内存池核心功能
 - ✅ 实现内存分配、释放、紧凑
 - ✅ 实现命令行界面和状态查询
@@ -217,4 +303,4 @@ Shared-Memory-Manage-System/
 
 ---
 
-**项目状态**：核心功能已完成，可正常运行 ✅
+**项目状态**：核心功能已完成，持久化功能开发中 🚧

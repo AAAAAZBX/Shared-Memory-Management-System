@@ -56,12 +56,6 @@ bool Save(const SharedMemoryPool& smp, const std::string& filename) {
             if (userLen > 0) {
                 file.write(meta.user.c_str(), userLen);
             }
-
-            size_t contentLen = meta.content.size();
-            file.write(reinterpret_cast<const char*>(&contentLen), sizeof(size_t));
-            if (contentLen > 0) {
-                file.write(meta.content.c_str(), contentLen);
-            }
         }
 
         // 3. 写入 used_map (需要访问内部数据，暂时跳过，通过元数据重建)
@@ -86,9 +80,9 @@ bool Save(const SharedMemoryPool& smp, const std::string& filename) {
             file.write(reinterpret_cast<const char*>(&entry.second.second), sizeof(size_t));
         }
 
-        // 5. 写入内存池数据（需要访问内部 pool_）
-        // 这里需要在 SharedMemoryPool 中添加 GetPoolData() 接口
-        // 暂时注释，实际使用时需要添加接口
+        // 5. 写入内存池数据
+        const uint8_t* poolData = smp.GetPoolData();
+        file.write(reinterpret_cast<const char*>(poolData), SharedMemoryPool::kPoolSize);
 
         return file.good();
     } catch (...) {
@@ -114,38 +108,68 @@ bool Load(SharedMemoryPool& smp, const std::string& filename) {
         // 2. 重置内存池
         smp.Reset();
 
-        // 3. 读取元数据
-        for (size_t i = 0; i < SharedMemoryPool::kBlockCount; ++i) {
+        // 3. 读取元数据（先读取，暂存）
+        struct MetaData {
             bool used;
-            file.read(reinterpret_cast<char*>(&used), sizeof(bool));
+            std::string user;
+        };
+        std::vector<MetaData> metaData(SharedMemoryPool::kBlockCount);
+
+        for (size_t i = 0; i < SharedMemoryPool::kBlockCount; ++i) {
+            file.read(reinterpret_cast<char*>(&metaData[i].used), sizeof(bool));
 
             size_t userLen;
             file.read(reinterpret_cast<char*>(&userLen), sizeof(size_t));
-            std::string user(userLen, '\0');
+            metaData[i].user.resize(userLen);
             if (userLen > 0) {
-                file.read(&user[0], userLen);
-            }
-
-            size_t contentLen;
-            file.read(reinterpret_cast<char*>(&contentLen), sizeof(size_t));
-            std::string content(contentLen, '\0');
-            if (contentLen > 0) {
-                file.read(&content[0], contentLen);
-            }
-
-            if (used) {
-                smp.SetMeta(i, user, content);
+                file.read(&metaData[i].user[0], userLen);
             }
         }
 
-        // 4. 读取 used_map（跳过，已通过 SetMeta 设置）
+        // 4. 读取并设置 used_map
         std::vector<uint8_t> bitsetBytes((SharedMemoryPool::kBlockCount + 7) / 8, 0);
         file.read(reinterpret_cast<char*>(bitsetBytes.data()), bitsetBytes.size());
+        // 从字节数组恢复 bitset
+        auto& usedMap = smp.GetUsedMap();
+        usedMap.reset(); // 先全部清零
+        for (size_t i = 0; i < SharedMemoryPool::kBlockCount; ++i) {
+            if (bitsetBytes[i / 8] & (1 << (i % 8))) {
+                usedMap.set(i, true);
+            }
+        }
 
-        // 5. 读取 user_block_info（需要通过接口设置）
-        // 这里需要添加接口，暂时跳过
+        // 5. 设置 free_block_count
+        smp.SetFreeBlockCount(header.free_block_count);
 
-        // 6. 读取内存池数据（需要接口）
+        // 6. 设置元数据（在 used_map 设置之后）
+        for (size_t i = 0; i < SharedMemoryPool::kBlockCount; ++i) {
+            if (metaData[i].used) {
+                smp.SetMetaForLoad(i, metaData[i].user);
+            }
+        }
+
+        // 7. 读取并设置 user_block_info
+        std::map<std::string, std::pair<size_t, size_t>> userInfo;
+        for (size_t i = 0; i < header.user_info_count; ++i) {
+            size_t keyLen;
+            file.read(reinterpret_cast<char*>(&keyLen), sizeof(size_t));
+            std::string key(keyLen, '\0');
+            if (keyLen > 0) {
+                file.read(&key[0], keyLen);
+            }
+
+            size_t startBlock;
+            size_t blockCount;
+            file.read(reinterpret_cast<char*>(&startBlock), sizeof(size_t));
+            file.read(reinterpret_cast<char*>(&blockCount), sizeof(size_t));
+
+            userInfo[key] = std::make_pair(startBlock, blockCount);
+        }
+        smp.SetUserBlockInfo(userInfo);
+
+        // 8. 读取内存池数据
+        uint8_t* poolData = smp.GetPoolData();
+        file.read(reinterpret_cast<char*>(poolData), SharedMemoryPool::kPoolSize);
 
         return file.good();
     } catch (...) {

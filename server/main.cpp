@@ -5,6 +5,22 @@
 #include <sstream>
 #include <vector>
 #include <string>
+#include <csignal>
+#include <cstdlib>
+
+static SharedMemoryPool* g_smp = nullptr;
+
+void SignalHandler(int signal) {
+    if (g_smp != nullptr) {
+        std::cerr << "\n\nReceived signal " << signal << ", saving data...\n";
+        if (Persistence::Save(*g_smp)) {
+            std::cerr << "Data saved successfully.\n";
+        } else {
+            std::cerr << "Failed to save data!\n";
+        }
+    }
+    std::exit(signal);
+}
 
 static std::vector<std::string> Split(const std::string& line) {
     std::istringstream iss(line);
@@ -21,10 +37,27 @@ int main() {
     std::cin.tie(nullptr);
 
     SharedMemoryPool smp;
+    g_smp = &smp;
+
+    // 注册信号处理器
+    std::signal(SIGINT, SignalHandler);
+    std::signal(SIGTERM, SignalHandler);
+#ifdef _WIN32
+    std::signal(SIGBREAK, SignalHandler);
+#endif
+
+    // 先初始化内存池（分配内存空间）
     if (!smp.Init()) {
         std::cerr << "Failed to initialize SharedMemoryPool.\n";
         std::cerr.flush();
         return 1;
+    }
+
+    // 尝试加载之前保存的数据
+    if (Persistence::Load(smp)) {
+        std::cout << "Loaded previous state from " << Persistence::kDefaultFile << "\n";
+    } else {
+        std::cout << "Initialized new memory pool.\n";
     }
 
     std::cout << "RemoteMem Server (toy) - type 'help'\n";
@@ -45,9 +78,14 @@ int main() {
         if (!std::getline(std::cin, line)) {
             // 如果 getline 失败，可能是 EOF 或输入流关闭
             if (std::cin.eof()) {
-                std::cerr << "\nEOF reached, exiting...\n";
+                std::cerr << "\nEOF reached, saving data...\n";
             } else if (std::cin.fail()) {
-                std::cerr << "\nInput stream error, exiting...\n";
+                std::cerr << "\nInput stream error, saving data...\n";
+            }
+            if (Persistence::Save(smp)) {
+                std::cerr << "Data saved successfully.\n";
+            } else {
+                std::cerr << "Failed to save data!\n";
             }
             break;
         }
@@ -58,6 +96,12 @@ int main() {
         }
 
         if (tokens[0] == "quit" || tokens[0] == "exit") {
+            std::cout << "Saving data...\n";
+            if (Persistence::Save(smp)) {
+                std::cout << "Data saved successfully.\n";
+            } else {
+                std::cerr << "Failed to save data!\n";
+            }
             std::cout << "bye\n";
             break;
         }
@@ -65,5 +109,6 @@ int main() {
         HandleCommand(tokens, smp);
     }
 
+    g_smp = nullptr;
     return 0;
 }
