@@ -41,8 +41,8 @@ bool TCPServer::Start() {
     // 设置套接字选项（允许地址重用）
     int opt = 1;
 #ifdef _WIN32
-    setsockopt(listenSocket_, SOL_SOCKET, SO_REUSEADDR, 
-               reinterpret_cast<const char*>(&opt), sizeof(opt));
+    setsockopt(listenSocket_, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&opt),
+               sizeof(opt));
 #else
     setsockopt(listenSocket_, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 #endif
@@ -53,8 +53,8 @@ bool TCPServer::Start() {
     serverAddr.sin_addr.s_addr = INADDR_ANY;
     serverAddr.sin_port = htons(port_);
 
-    if (bind(listenSocket_, reinterpret_cast<sockaddr*>(&serverAddr), 
-             sizeof(serverAddr)) == SOCKET_ERROR) {
+    if (bind(listenSocket_, reinterpret_cast<sockaddr*>(&serverAddr), sizeof(serverAddr)) ==
+        SOCKET_ERROR) {
         std::cerr << "Failed to bind to port " << port_ << "\n";
         close(listenSocket_);
         return false;
@@ -74,11 +74,10 @@ bool TCPServer::Start() {
     while (running_) {
         sockaddr_in clientAddr{};
         socklen_t clientAddrLen = sizeof(clientAddr);
-        
-        SOCKET clientSocket = accept(listenSocket_, 
-                                     reinterpret_cast<sockaddr*>(&clientAddr), 
-                                     &clientAddrLen);
-        
+
+        SOCKET clientSocket =
+            accept(listenSocket_, reinterpret_cast<sockaddr*>(&clientAddr), &clientAddrLen);
+
         if (clientSocket == INVALID_SOCKET) {
             if (running_) {
                 std::cerr << "Failed to accept connection\n";
@@ -91,13 +90,13 @@ bool TCPServer::Start() {
         inet_ntop(AF_INET, &clientAddr.sin_addr, ipStr, INET_ADDRSTRLEN);
         uint16_t clientPort = ntohs(clientAddr.sin_port);
         std::string clientIP(ipStr);
-        std::string userID = Protocol::MakeUserID(clientIP, clientPort);
+        std::string clientInfo = clientIP + ":" + std::to_string(clientPort);
 
-        std::cout << "Client connected: " << userID << "\n";
+        std::cout << "Client connected: " << clientInfo << "\n";
 
         // 为每个客户端创建处理线程
         std::lock_guard<std::mutex> lock(threadsMutex_);
-        clientThreads_.emplace_back([this, clientSocket, clientIP, clientPort, userID]() {
+        clientThreads_.emplace_back([this, clientSocket, clientIP, clientPort]() {
             HandleClient(clientSocket, clientIP, clientPort);
         });
     }
@@ -133,8 +132,9 @@ void TCPServer::Stop() {
     std::cout << "TCP Server stopped\n";
 }
 
-void TCPServer::HandleClient(SOCKET clientSocket, const std::string& clientIP, uint16_t clientPort) {
-    std::string userID = Protocol::MakeUserID(clientIP, clientPort);
+void TCPServer::HandleClient(SOCKET clientSocket, const std::string& clientIP,
+                             uint16_t clientPort) {
+    std::string clientInfo = clientIP + ":" + std::to_string(clientPort);
 
     while (running_) {
         Protocol::Request req;
@@ -143,28 +143,26 @@ void TCPServer::HandleClient(SOCKET clientSocket, const std::string& clientIP, u
         }
 
         Protocol::Response resp;
-        ProcessRequest(clientSocket, userID, req, resp);
+        ProcessRequest(clientSocket, req, resp);
 
         if (!SendResponse(clientSocket, resp)) {
             break; // 发送失败，断开连接
         }
     }
 
-    // 清理：释放该用户的内存（可选）
-    // smp_.FreeByUser(userID);
+    // 注意：客户端断开时不会自动清理内存，内存由 Memory ID 管理
 
     close(clientSocket);
-    std::cout << "Client disconnected: " << userID << "\n";
+    std::cout << "Client disconnected: " << clientInfo << "\n";
 }
 
 bool TCPServer::ReceiveRequest(SOCKET clientSocket, Protocol::Request& req) {
     // 先读取5字节（命令类型 + 数据长度）
     uint8_t header[5];
     size_t received = 0;
-    
+
     while (received < 5) {
-        int n = recv(clientSocket, reinterpret_cast<char*>(header + received), 
-                     5 - received, 0);
+        int n = recv(clientSocket, reinterpret_cast<char*>(header + received), 5 - received, 0);
         if (n <= 0) {
             return false; // 连接断开或错误
         }
@@ -184,7 +182,7 @@ bool TCPServer::ReceiveRequest(SOCKET clientSocket, Protocol::Request& req) {
     std::vector<uint8_t> data(dataLen);
     received = 0;
     while (received < dataLen) {
-        int n = recv(clientSocket, reinterpret_cast<char*>(data.data() + received), 
+        int n = recv(clientSocket, reinterpret_cast<char*>(data.data() + received),
                      dataLen - received, 0);
         if (n <= 0) {
             return false;
@@ -200,108 +198,182 @@ bool TCPServer::ReceiveRequest(SOCKET clientSocket, Protocol::Request& req) {
     return Protocol::DeserializeRequest(fullPacket.data(), fullPacket.size(), req);
 }
 
-void TCPServer::ProcessRequest(SOCKET clientSocket, const std::string& userID,
-                               const Protocol::Request& req, Protocol::Response& resp) {
+void TCPServer::ProcessRequest(SOCKET clientSocket, const Protocol::Request& req,
+                               Protocol::Response& resp) {
     resp.code = Protocol::ResponseCode::SUCCESS;
     resp.data.clear();
 
     try {
         switch (req.cmd) {
-            case Protocol::CommandType::ALLOC: {
-                // 数据格式：内容字符串（以\0结尾）
-                if (req.data.empty()) {
-                    resp.code = Protocol::ResponseCode::ERROR_INVALID_PARAM;
-                    resp.data = "Empty content";
-                    break;
-                }
-                
-                int blockID = smp_.AllocateBlock(userID, req.data.data(), req.data.size());
-                if (blockID < 0) {
-                    resp.code = Protocol::ResponseCode::ERROR_NO_MEMORY;
-                    resp.data = "Memory allocation failed";
-                } else {
-                    resp.data = "Allocated at block_" + std::to_string(blockID);
-                }
+        case Protocol::CommandType::ALLOC: {
+            // 数据格式：description\0content
+            if (req.data.empty()) {
+                resp.code = Protocol::ResponseCode::ERROR_INVALID_PARAM;
+                resp.data = "Empty data, expected format: description\\0content";
                 break;
             }
 
-            case Protocol::CommandType::UPDATE: {
-                if (req.data.empty()) {
-                    resp.code = Protocol::ResponseCode::ERROR_INVALID_PARAM;
-                    resp.data = "Empty content";
-                    break;
-                }
-                
-                // 检查用户是否存在
-                const auto& userInfo = smp_.GetUserBlockInfo();
-                if (userInfo.find(userID) == userInfo.end()) {
-                    resp.code = Protocol::ResponseCode::ERROR_NOT_FOUND;
-                    resp.data = "User not found";
-                    break;
-                }
-                
-                // 释放旧内存
-                smp_.FreeByUser(userID);
-                
-                // 分配新内存
-                int blockID = smp_.AllocateBlock(userID, req.data.data(), req.data.size());
-                if (blockID < 0) {
-                    resp.code = Protocol::ResponseCode::ERROR_NO_MEMORY;
-                    resp.data = "Memory allocation failed";
-                } else {
-                    resp.data = "Updated at block_" + std::to_string(blockID);
-                }
+            // 查找分隔符
+            size_t nullPos = req.data.find('\0');
+            if (nullPos == std::string::npos || nullPos == 0) {
+                resp.code = Protocol::ResponseCode::ERROR_INVALID_PARAM;
+                resp.data = "Invalid format, expected: description\\0content";
                 break;
             }
 
-            case Protocol::CommandType::DELETE: {
-                if (!smp_.FreeByUser(userID)) {
-                    resp.code = Protocol::ResponseCode::ERROR_NOT_FOUND;
-                    resp.data = "User not found";
-                } else {
-                    resp.data = "Memory freed";
-                }
+            std::string description = req.data.substr(0, nullPos);
+            std::string content = req.data.substr(nullPos + 1);
+
+            if (content.empty()) {
+                resp.code = Protocol::ResponseCode::ERROR_INVALID_PARAM;
+                resp.data = "Empty content";
                 break;
             }
 
-            case Protocol::CommandType::READ: {
-                std::string content = smp_.GetUserContentAsString(userID);
-                if (content.empty()) {
-                    resp.code = Protocol::ResponseCode::ERROR_NOT_FOUND;
-                    resp.data = "User not found or content is empty";
+            // 自动生成 Memory ID
+            std::string memory_id = smp_.GenerateNextMemoryId();
+
+            // 分配内存
+            int blockID =
+                smp_.AllocateBlock(memory_id, description, content.data(), content.size());
+            if (blockID < 0) {
+                resp.code = Protocol::ResponseCode::ERROR_NO_MEMORY;
+                resp.data = "Memory allocation failed";
+            } else {
+                resp.data = memory_id; // 返回 Memory ID
+            }
+            break;
+        }
+
+        case Protocol::CommandType::UPDATE: {
+            // 数据格式：memory_id\0new_content
+            if (req.data.empty()) {
+                resp.code = Protocol::ResponseCode::ERROR_INVALID_PARAM;
+                resp.data = "Empty data, expected format: memory_id\\0new_content";
+                break;
+            }
+
+            size_t nullPos = req.data.find('\0');
+            if (nullPos == std::string::npos || nullPos == 0) {
+                resp.code = Protocol::ResponseCode::ERROR_INVALID_PARAM;
+                resp.data = "Invalid format, expected: memory_id\\0new_content";
+                break;
+            }
+
+            std::string memory_id = req.data.substr(0, nullPos);
+            std::string newContent = req.data.substr(nullPos + 1);
+
+            // 检查 Memory ID 是否存在
+            const auto& memoryInfo = smp_.GetMemoryInfo();
+            if (memoryInfo.find(memory_id) == memoryInfo.end()) {
+                resp.code = Protocol::ResponseCode::ERROR_NOT_FOUND;
+                resp.data = "Memory ID not found: " + memory_id;
+                break;
+            }
+
+            // 获取当前描述
+            const auto& meta = smp_.GetMeta(memoryInfo.at(memory_id).first);
+            std::string description = meta.description;
+
+            // 释放旧内存
+            smp_.FreeByMemoryId(memory_id);
+
+            // 分配新内存
+            int blockID =
+                smp_.AllocateBlock(memory_id, description, newContent.data(), newContent.size());
+            if (blockID < 0) {
+                resp.code = Protocol::ResponseCode::ERROR_NO_MEMORY;
+                resp.data = "Memory allocation failed";
+            } else {
+                resp.data = "Updated: " + memory_id;
+            }
+            break;
+        }
+
+        case Protocol::CommandType::DELETE: {
+            // 数据格式：memory_id
+            if (req.data.empty()) {
+                resp.code = Protocol::ResponseCode::ERROR_INVALID_PARAM;
+                resp.data = "Empty memory_id";
+                break;
+            }
+
+            std::string memory_id = req.data;
+            if (!smp_.FreeByMemoryId(memory_id)) {
+                resp.code = Protocol::ResponseCode::ERROR_NOT_FOUND;
+                resp.data = "Memory ID not found: " + memory_id;
+            } else {
+                resp.data = "Memory freed: " + memory_id;
+            }
+            break;
+        }
+
+        case Protocol::CommandType::READ: {
+            // 数据格式：memory_id
+            if (req.data.empty()) {
+                resp.code = Protocol::ResponseCode::ERROR_INVALID_PARAM;
+                resp.data = "Empty memory_id";
+                break;
+            }
+
+            std::string memory_id = req.data;
+            std::string content = smp_.GetMemoryContentAsString(memory_id);
+            if (content.empty()) {
+                resp.code = Protocol::ResponseCode::ERROR_NOT_FOUND;
+                resp.data = "Memory ID not found or content is empty: " + memory_id;
+            } else {
+                // 返回格式化的内容信息
+                const auto& memoryInfo = smp_.GetMemoryInfo();
+                auto it = memoryInfo.find(memory_id);
+                if (it != memoryInfo.end()) {
+                    const auto& meta = smp_.GetMeta(it->second.first);
+                    std::ostringstream oss;
+                    oss << "Memory ID: " << memory_id << "\n";
+                    oss << "Description: " << meta.description << "\n";
+                    oss << "Content: " << content << "\n";
+                    oss << "Size: " << content.size() << " bytes\n";
+                    oss << "Last Modified: " << smp_.GetMemoryLastModifiedTimeString(memory_id);
+                    resp.data = oss.str();
                 } else {
                     resp.data = content;
                 }
-                break;
             }
+            break;
+        }
 
-            case Protocol::CommandType::STATUS: {
-                // 返回用户的状态信息（JSON格式或简单文本）
-                const auto& userInfo = smp_.GetUserBlockInfo();
-                auto it = userInfo.find(userID);
-                if (it == userInfo.end()) {
-                    resp.code = Protocol::ResponseCode::ERROR_NOT_FOUND;
-                    resp.data = "User not found";
-                } else {
-                    std::ostringstream oss;
-                    oss << "User: " << userID << "\n";
-                    oss << "Blocks: " << it->second.first << " - " 
-                        << (it->second.first + it->second.second - 1) << "\n";
-                    oss << "Last Modified: " << smp_.GetUserLastModifiedTimeString(userID);
-                    resp.data = oss.str();
+        case Protocol::CommandType::STATUS: {
+            // 返回所有内存块的状态信息
+            const auto& memoryInfo = smp_.GetMemoryInfo();
+            if (memoryInfo.empty()) {
+                resp.data = "No allocated memory blocks";
+            } else {
+                std::ostringstream oss;
+                oss << "Memory Pool Status:\n";
+                oss << "Total blocks: " << memoryInfo.size() << "\n\n";
+
+                for (const auto& entry : memoryInfo) {
+                    const auto& meta = smp_.GetMeta(entry.second.first);
+                    oss << "Memory ID: " << entry.first << "\n";
+                    oss << "  Description: " << meta.description << "\n";
+                    oss << "  Blocks: " << entry.second.first << " - "
+                        << (entry.second.first + entry.second.second - 1) << "\n";
+                    oss << "  Last Modified: " << smp_.GetMemoryLastModifiedTimeString(entry.first)
+                        << "\n\n";
                 }
-                break;
+                resp.data = oss.str();
             }
+            break;
+        }
 
-            case Protocol::CommandType::PING: {
-                resp.data = "PONG";
-                break;
-            }
+        case Protocol::CommandType::PING: {
+            resp.data = "PONG";
+            break;
+        }
 
-            default:
-                resp.code = Protocol::ResponseCode::ERROR_INVALID_CMD;
-                resp.data = "Unknown command";
-                break;
+        default:
+            resp.code = Protocol::ResponseCode::ERROR_INVALID_CMD;
+            resp.data = "Unknown command";
+            break;
         }
     } catch (const std::exception& e) {
         resp.code = Protocol::ResponseCode::ERROR_INTERNAL;
@@ -311,7 +383,7 @@ void TCPServer::ProcessRequest(SOCKET clientSocket, const std::string& userID,
 
 bool TCPServer::SendResponse(SOCKET clientSocket, const Protocol::Response& resp) {
     std::vector<uint8_t> buffer = Protocol::SerializeResponse(resp);
-    
+
     size_t sent = 0;
     while (sent < buffer.size()) {
         int n = send(clientSocket, reinterpret_cast<const char*>(buffer.data() + sent),
@@ -321,6 +393,6 @@ bool TCPServer::SendResponse(SOCKET clientSocket, const Protocol::Response& resp
         }
         sent += n;
     }
-    
+
     return true;
 }

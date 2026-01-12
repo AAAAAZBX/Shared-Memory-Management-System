@@ -119,7 +119,14 @@
     "variant": "cpp",
     "bitset": "cpp",
     "map": "cpp",
-    "fstream": "cpp"
+    "fstream": "cpp",
+    "condition_variable": "cpp",
+    "csignal": "cpp",
+    "ratio": "cpp",
+    "mutex": "cpp",
+    "semaphore": "cpp",
+    "stop_token": "cpp",
+    "thread": "cpp"
   },
   "[cpp]": {
     "editor.defaultFormatter": "ms-vscode.cpptools",

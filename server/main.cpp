@@ -7,6 +7,25 @@
 #include <string>
 #include <csignal>
 #include <cstdlib>
+#include <cstring>
+#include <algorithm>
+
+#ifdef _WIN32
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0600 // Windows Vista or later for inet_ntop
+#endif
+#include <winsock2.h>
+#include <ws2tcpip.h>
+// Note: ws2_32.lib must be linked via -lws2_32 compiler flag
+// #pragma comment doesn't work with MinGW
+#else
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <ifaddrs.h>
+#include <unistd.h>
+#endif
 
 static SharedMemoryPool* g_smp = nullptr;
 
@@ -29,6 +48,177 @@ static std::vector<std::string> Split(const std::string& line) {
     while (iss >> x)
         t.push_back(x);
     return t;
+}
+
+void printLogo() {
+    std::cout << "##############################################\n";
+    std::cout << "#                                            #\n";
+    std::cout << "#            Shared Memory Manager           #\n";
+    std::cout << "#                                            #\n";
+    std::cout << "##############################################\n";
+}
+
+// 判断IP地址是否为外部可访问的地址
+static bool IsExternalAccessibleIP(const std::string& ip) {
+    // 排除本地回环地址
+    if (ip == "127.0.0.1" || ip == "::1") {
+        return false;
+    }
+
+    // 排除自动配置IP（APIPA，169.254.x.x）
+    if (ip.find("169.254.") == 0) {
+        return false;
+    }
+
+    // 排除多播地址
+    if (ip.find("224.") == 0 || ip.find("225.") == 0 || ip.find("226.") == 0 ||
+        ip.find("227.") == 0 || ip.find("228.") == 0 || ip.find("229.") == 0 ||
+        ip.find("230.") == 0 || ip.find("231.") == 0 || ip.find("232.") == 0 ||
+        ip.find("233.") == 0 || ip.find("234.") == 0 || ip.find("235.") == 0 ||
+        ip.find("236.") == 0 || ip.find("237.") == 0 || ip.find("238.") == 0 ||
+        ip.find("239.") == 0) {
+        return false;
+    }
+
+    // 其他地址都是外部可访问的（包括私有IP和公网IP）
+    return true;
+}
+
+// 判断IP地址是否为公网IP
+static bool IsPublicIP(const std::string& ip) {
+    // 私有IP地址范围：
+    // 10.0.0.0 - 10.255.255.255
+    // 172.16.0.0 - 172.31.255.255
+    // 192.168.0.0 - 192.168.255.255
+
+    if (ip.find("10.") == 0) {
+        return false; // 私有IP
+    }
+
+    if (ip.find("172.") == 0) {
+        // 检查是否为 172.16-31.x.x
+        size_t dot1 = ip.find('.', 4);
+        if (dot1 != std::string::npos) {
+            std::string second = ip.substr(4, dot1 - 4);
+            int secondNum = std::stoi(second);
+            if (secondNum >= 16 && secondNum <= 31) {
+                return false; // 私有IP
+            }
+        }
+    }
+
+    if (ip.find("192.168.") == 0) {
+        return false; // 私有IP
+    }
+
+    // 其他都是公网IP（或特殊地址，但我们已经排除了）
+    return true;
+}
+
+// 获取本机外部可访问的IP地址列表
+static std::vector<std::string> GetExternalAccessibleIPs() {
+    std::vector<std::string> publicIPs;  // 公网IP
+    std::vector<std::string> privateIPs; // 私有IP（局域网）
+
+    // Windows平台：使用Winsock获取IP地址
+    WSADATA wsaData;
+    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
+        return publicIPs; // 返回空列表
+    }
+
+    char hostname[256];
+    if (gethostname(hostname, sizeof(hostname)) == 0) {
+        struct addrinfo hints = {};
+        hints.ai_family = AF_INET;
+        hints.ai_socktype = SOCK_STREAM;
+
+        struct addrinfo* result = nullptr;
+        if (getaddrinfo(hostname, nullptr, &hints, &result) == 0) {
+            for (struct addrinfo* ptr = result; ptr != nullptr; ptr = ptr->ai_next) {
+                if (ptr->ai_family == AF_INET) {
+                    struct sockaddr_in* sockaddr = (struct sockaddr_in*)ptr->ai_addr;
+                    const char* ipStr = inet_ntoa(sockaddr->sin_addr);
+                    if (ipStr != nullptr) {
+                        std::string ipString(ipStr);
+                        if (IsExternalAccessibleIP(ipString)) {
+                            if (IsPublicIP(ipString)) {
+                                publicIPs.push_back(ipString);
+                            } else {
+                                privateIPs.push_back(ipString);
+                            }
+                        }
+                    }
+                }
+            }
+            freeaddrinfo(result);
+        }
+    }
+
+    WSACleanup();
+
+    // 先返回公网IP，再返回私有IP
+    std::vector<std::string> result;
+    result.insert(result.end(), publicIPs.begin(), publicIPs.end());
+    result.insert(result.end(), privateIPs.begin(), privateIPs.end());
+    return result;
+}
+
+// 显示服务器连接信息
+static void PrintServerConnectionInfo(uint16_t port) {
+    std::cout << "\n";
+    printLogo();
+    std::cout << "\n";
+    std::cout << "Server is ready for client connections:\n";
+    std::cout << "\n";
+
+    std::vector<std::string> externalIPs = GetExternalAccessibleIPs();
+
+    if (externalIPs.empty()) {
+        std::cout << "  [WARNING] No external accessible IP addresses found.\n";
+        std::cout << "  Only localhost (127.0.0.1) is available for local connections.\n";
+        std::cout << "\n";
+        std::cout << "  Local only:  127.0.0.1:" << port << " (Local access only)\n";
+    } else {
+        // 分类显示
+        bool hasPublic = false;
+        bool hasPrivate = false;
+
+        for (const auto& ip : externalIPs) {
+            if (IsPublicIP(ip)) {
+                hasPublic = true;
+                break;
+            } else {
+                hasPrivate = true;
+            }
+        }
+
+        if (hasPublic) {
+            std::cout << "  Public IP (Internet access):\n";
+            for (const auto& ip : externalIPs) {
+                if (IsPublicIP(ip)) {
+                    std::cout << "    " << ip << ":" << port << " (Internet access)\n";
+                }
+            }
+            std::cout << "\n";
+        }
+
+        if (hasPrivate) {
+            std::cout << "  Private IP (LAN access):\n";
+            for (const auto& ip : externalIPs) {
+                if (!IsPublicIP(ip)) {
+                    std::cout << "    " << ip << ":" << port << " (LAN access)\n";
+                }
+            }
+            std::cout << "\n";
+        }
+
+        std::cout << "  Local only:  127.0.0.1:" << port << " (Local access only)\n";
+    }
+
+    std::cout << "\n";
+    std::cout << "Note: External clients should use Public IP or Private IP addresses.\n";
+    std::cout << "========================================\n";
+    std::cout << "\n";
 }
 
 int main() {
@@ -59,6 +249,10 @@ int main() {
     } else {
         std::cout << "Initialized new memory pool.\n";
     }
+
+    // 显示服务器连接信息（默认端口8888）
+    const uint16_t kDefaultPort = 8888;
+    PrintServerConnectionInfo(kDefaultPort);
 
     std::cout << "RemoteMem Server (toy) - type 'help'\n";
     std::cout.flush();

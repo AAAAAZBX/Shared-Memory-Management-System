@@ -178,10 +178,10 @@ void HandleCommand(const std::vector<std::string>& tokens, SharedMemoryPool& smp
         if (mode == "--memory") {
             // 原来的 status 命令内容
             std::cout << "Memory Pool Status:\n";
-            std::cout << "|          range          |    MemoryID    |    Description    |    Last "
+            std::cout << "|    MemoryID    |    Description    |          range          |    Last "
                          "Modified    |\n";
             std::cout
-                << "|-------------------------|----------------|-------------------|----------"
+                << "|----------------|-------------------|-------------------------|----------"
                    "-----------|\n";
 
             // 使用指针避免复制数据，按起始 block 排序
@@ -211,9 +211,9 @@ void HandleCommand(const std::vector<std::string>& tokens, SharedMemoryPool& smp
                     description = description.substr(0, 14) + "...";
                 }
                 std::string lastModified = smp.GetMemoryLastModifiedTimeString(entry->first);
-                std::cout << "| " << std::left << std::setw(23) << std::setfill(' ') << rangeStr
-                          << " | " << std::left << std::setw(14) << entry->first << " | "
-                          << std::left << std::setw(17) << description << " | " << std::left
+                std::cout << "| " << std::left << std::setw(14) << std::setfill(' ') << entry->first
+                          << " | " << std::left << std::setw(17) << description << " | "
+                          << std::left << std::setw(23) << rangeStr << " | " << std::left
                           << std::setw(19) << lastModified << " |\n";
             }
         } else if (mode == "--block") {

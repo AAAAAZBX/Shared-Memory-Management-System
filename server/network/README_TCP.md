@@ -1,8 +1,10 @@
-# TCP 服务器实现说明
+# TCP 客户端接口设计说明
 
 ## 概述
 
-TCP 服务器模块提供了网络访问接口，允许客户端通过网络连接访问共享内存池系统。
+TCP 服务器模块设计用于提供客户端接口，允许客户端通过网络连接访问共享内存池系统。系统通过 TCP 协议提供 API 接口，客户端无需单独的程序，只需通过网络连接即可访问。
+
+**当前状态**：基础框架已实现，但需要更新为 Memory ID 系统并集成到主程序。
 
 ## 架构设计
 
@@ -30,20 +32,26 @@ TCP 服务器模块提供了网络访问接口，允许客户端通过网络连�
 
 ### 2. 服务器层 (`tcp_server.h/cpp`)
 
-**核心功能**：
+**设计目标**：
 - 监听指定端口（默认8888）
 - 接受客户端连接
 - 为每个连接创建独立处理线程
-- 从连接获取客户端 IP:Port 作为用户标识
 - 处理客户端请求并返回响应
+- 使用 Memory ID 系统管理内存（所有客户端共享访问，不再使用 IP:Port 作为用户标识）
 
-**工作流程**：
+**工作流程**（待实现）：
 ```
 1. 启动服务器 → 绑定端口 → 开始监听
-2. 接受连接 → 获取客户端IP:Port → 创建用户ID
-3. 创建处理线程 → 接收请求 → 处理请求 → 发送响应
-4. 客户端断开 → 清理资源
+2. 接受客户端连接 → 创建处理线程
+3. 接收请求 → 解析协议 → 调用内存池接口（使用 Memory ID） → 发送响应
+4. 客户端断开 → 清理资源（不清理内存，内存由 Memory ID 管理）
 ```
+
+**当前实现状态**：
+- ✅ TCP 服务器基础框架已实现
+- ✅ 网络协议定义已完成
+- ⏳ 待更新：ProcessRequest 需要更新为 Memory ID 系统
+- ⏳ 待集成：需要集成到 main.cpp
 
 ## 使用方法
 
@@ -95,7 +103,7 @@ g++ -std=c++17 -Wall main.cpp ^
 
 注意：Windows 平台需要链接 `ws2_32.lib`（通过 `-lws2_32` 或 `#pragma comment`）
 
-## 客户端实现示例
+## 客户端接口使用示例
 
 ### Python 客户端示例
 
@@ -125,24 +133,37 @@ def send_request(sock, cmd_type, data):
 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 sock.connect(('localhost', 8888))
 
-# 分配内存
-status, resp = send_request(sock, 0x01, "Hello World")
-print(f"ALLOC: {status}, {resp}")
+# 分配内存（需要提供 description 和 content）
+# 协议格式：description + "\0" + content
+alloc_data = "User Data\0Hello World"
+status, resp = send_request(sock, 0x01, alloc_data)
+print(f"ALLOC: {status}, {resp}")  # 返回 Memory ID
 
-# 读取内容
-status, resp = send_request(sock, 0x04, "")
+# 读取内容（使用 Memory ID）
+status, resp = send_request(sock, 0x04, "memory_00001")
 print(f"READ: {status}, {resp}")
+
+# 更新内容（使用 Memory ID）
+update_data = "Updated Content"
+status, resp = send_request(sock, 0x02, "memory_00001\0" + update_data)
+print(f"UPDATE: {status}, {resp}")
+
+# 释放内存（使用 Memory ID）
+status, resp = send_request(sock, 0x03, "memory_00001")
+print(f"DELETE: {status}, {resp}")
 
 sock.close()
 ```
 
 ## 注意事项
 
-1. **线程安全**：每个客户端连接在独立线程中处理，内存池操作需要保证线程安全
-2. **错误处理**：网络操作可能失败，需要适当的错误处理
-3. **资源管理**：客户端断开时需要清理资源
-4. **粘包问题**：当前实现已处理粘包（通过读取完整数据长度）
-5. **用户标识**：使用 `IP:Port` 作为用户标识，确保唯一性
+1. **客户端接口**：系统通过 TCP 服务器提供客户端接口，客户端通过网络连接访问，无需单独的程序
+2. **Memory ID 系统**：使用 `memory_00001`, `memory_00002` 等唯一标识符，所有客户端共享访问
+3. **线程安全**：每个客户端连接在独立线程中处理，内存池操作需要保证线程安全
+4. **错误处理**：网络操作可能失败，需要适当的错误处理
+5. **资源管理**：客户端断开时不会自动清理内存，内存由 Memory ID 管理
+6. **粘包问题**：当前实现已处理粘包（通过读取完整数据长度）
+7. **协议格式**：ALLOC 命令需要提供 description 和 content，用 `\0` 分隔
 
 ## 扩展功能
 
