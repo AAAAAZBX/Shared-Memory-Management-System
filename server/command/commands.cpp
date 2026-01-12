@@ -24,31 +24,31 @@ static const std::vector<CommandSpec> kCmds = {
 
     // 分配命令
     {"alloc",
-     "Allocate memory for user with content",
-     "alloc <user> \"<content>\"",
-     {"alloc 192.168.1.100:54321 \"Hello World\"", "alloc client_1 \"string1\""}},
+     "Allocate memory with description and content",
+     "alloc \"<description>\" \"<content>\"",
+     {"alloc \"User Data\" \"Hello World\"", "alloc \"Config\" \"key=value\""}},
 
     // 读取命令
     {"read",
-     "Show content written by a user",
-     "read <user>",
-     {"read 192.168.1.100:54321", "read client_1"}},
+     "Show content by memory ID",
+     "read <memory_id>",
+     {"read memory_00001", "read memory_00002"}},
 
     // 释放命令
     {"free",
-     "Free memory allocated by a user",
-     "free <user>",
-     {"free 192.168.1.100:54321", "free client_1"}},
+     "Free memory by memory ID",
+     "free <memory_id>",
+     {"free memory_00001", "free memory_00002"}},
     {"delete",
-     "Delete memory allocated by a user (alias for free)",
-     "delete <user>",
-     {"delete 192.168.1.100:54321", "delete client_1"}},
+     "Delete memory by memory ID (alias for free)",
+     "delete <memory_id>",
+     {"delete memory_00001", "delete memory_00002"}},
 
     // 更新命令
     {"update",
-     "Update content for a user",
-     "update <user> \"<new_content>\"",
-     {"update 192.168.1.100:54321 \"New Content\"", "update client_1 \"Updated\""}},
+     "Update content for a memory ID",
+     "update <memory_id> \"<new_content>\"",
+     {"update memory_00001 \"New Content\"", "update memory_00002 \"Updated\""}},
 
     // 紧凑命令
     {"compact", "Compact memory pool (merge free blocks)", "compact", {"compact"}},
@@ -178,17 +178,18 @@ void HandleCommand(const std::vector<std::string>& tokens, SharedMemoryPool& smp
         if (mode == "--memory") {
             // 原来的 status 命令内容
             std::cout << "Memory Pool Status:\n";
+            std::cout << "|          range          |    MemoryID    |    Description    |    Last "
+                         "Modified    |\n";
             std::cout
-                << "|          range          |    Occupied Client    |    Last Modified    |\n";
-            std::cout
-                << "|-------------------------|-----------------------|---------------------|\n";
+                << "|-------------------------|----------------|-------------------|----------"
+                   "-----------|\n";
 
             // 使用指针避免复制数据，按起始 block 排序
-            const auto& userInfo = smp.GetUserBlockInfo();
+            const auto& memoryInfo = smp.GetMemoryInfo();
             std::vector<const std::pair<const std::string, std::pair<size_t, size_t>>*>
                 sortedEntries;
-            sortedEntries.reserve(userInfo.size());
-            for (const auto& entry : userInfo) {
+            sortedEntries.reserve(memoryInfo.size());
+            for (const auto& entry : memoryInfo) {
                 sortedEntries.push_back(&entry);
             }
             // 按照起始 block ID 排序
@@ -203,29 +204,55 @@ void HandleCommand(const std::vector<std::string>& tokens, SharedMemoryPool& smp
                             << "block_" << std::setfill('0') << std::setw(3)
                             << (entry->second.first + entry->second.second - 1);
                 std::string rangeStr = rangeStream.str();
-                std::string lastModified = smp.GetUserLastModifiedTimeString(entry->first);
+                const auto& meta = smp.GetMeta(entry->second.first);
+                std::string description = meta.description.empty() ? "-" : meta.description;
+                // 截断过长的描述
+                if (description.length() > 17) {
+                    description = description.substr(0, 14) + "...";
+                }
+                std::string lastModified = smp.GetMemoryLastModifiedTimeString(entry->first);
                 std::cout << "| " << std::left << std::setw(23) << std::setfill(' ') << rangeStr
-                          << " | " << std::left << std::setw(21) << entry->first << " | "
-                          << std::left << std::setw(19) << lastModified << " |\n";
+                          << " | " << std::left << std::setw(14) << entry->first << " | "
+                          << std::left << std::setw(17) << description << " | " << std::left
+                          << std::setw(19) << lastModified << " |\n";
             }
         } else if (mode == "--block") {
             // 原来的 blocks 命令内容
             std::cout << "Block Pool Status:\n";
-            std::cout << "|     ID    |    Occupied Client    |    Last Modified    |\n";
-            std::cout << "|-----------|-----------------------|---------------------|\n";
+            std::cout
+                << "|     ID    |    MemoryID    |    Description    |    Last Modified    |\n";
+            std::cout
+                << "|-----------|----------------|-------------------|---------------------|\n";
+            bool hasUsedBlocks = false;
             for (size_t i = 0; i < SharedMemoryPool::kBlockCount; i++) {
                 const auto& meta = smp.GetMeta(i);
+
+                // 只显示已使用的块，跳过空的块
+                if (!meta.used || meta.memory_id.empty()) {
+                    continue;
+                }
+
+                hasUsedBlocks = true;
                 std::ostringstream oss;
                 oss << "block_" << std::setfill('0') << std::setw(3) << i << std::setfill(' ');
-                // 检查块是否被使用，而不是只检查 user 是否为空
-                std::string client = (meta.used && !meta.user.empty()) ? meta.user : "-";
-                std::string lastModified = "-";
-                if (meta.used && !meta.user.empty()) {
-                    lastModified = smp.GetUserLastModifiedTimeString(meta.user);
+
+                std::string memoryId = meta.memory_id;
+                std::string description = meta.description.empty() ? "-" : meta.description;
+                // 截断过长的描述
+                if (description.length() > 17) {
+                    description = description.substr(0, 14) + "...";
                 }
+                std::string lastModified = smp.GetMemoryLastModifiedTimeString(meta.memory_id);
+
                 std::cout << "| " << std::setw(9) << oss.str() << " | " << std::left
-                          << std::setw(21) << client << " | " << std::left << std::setw(19)
-                          << lastModified << " |\n";
+                          << std::setw(14) << memoryId << " | " << std::left << std::setw(17)
+                          << description << " | " << std::left << std::setw(19) << lastModified
+                          << " |\n";
+            }
+
+            if (!hasUsedBlocks) {
+                std::cout
+                    << "| No allocated blocks                                                  |\n";
             }
         } else {
             std::cout << "Unknown status mode: " << mode << "\n";
@@ -311,42 +338,42 @@ void HandleCommand(const std::vector<std::string>& tokens, SharedMemoryPool& smp
         std::cout << "  +--------------------------------------------------------+\n";
         std::cout << "\n";
 
-        // 4. 用户统计
-        const auto& userInfo = smp.GetUserBlockInfo();
-        size_t userCount = userInfo.size();
-        size_t totalUserBlocks = 0;
-        size_t maxUserBlocks = 0;
-        size_t minUserBlocks = (userCount > 0) ? static_cast<size_t>(-1) : 0;
-        std::string maxUser, minUser;
+        // 4. 内存统计
+        const auto& memoryInfo = smp.GetMemoryInfo();
+        size_t memoryCount = memoryInfo.size();
+        size_t totalMemoryBlocks = 0;
+        size_t maxMemoryBlocks = 0;
+        size_t minMemoryBlocks = (memoryCount > 0) ? static_cast<size_t>(-1) : 0;
+        std::string maxMemoryId, minMemoryId;
 
-        for (const auto& entry : userInfo) {
+        for (const auto& entry : memoryInfo) {
             size_t blockCount = entry.second.second;
-            totalUserBlocks += blockCount;
-            if (blockCount > maxUserBlocks) {
-                maxUserBlocks = blockCount;
-                maxUser = entry.first;
+            totalMemoryBlocks += blockCount;
+            if (blockCount > maxMemoryBlocks) {
+                maxMemoryBlocks = blockCount;
+                maxMemoryId = entry.first;
             }
-            if (blockCount < minUserBlocks) {
-                minUserBlocks = blockCount;
-                minUser = entry.first;
+            if (blockCount < minMemoryBlocks) {
+                minMemoryBlocks = blockCount;
+                minMemoryId = entry.first;
             }
         }
 
-        double avgUserBlocks =
-            (userCount > 0) ? (static_cast<double>(totalUserBlocks) / userCount) : 0.0;
+        double avgMemoryBlocks =
+            (memoryCount > 0) ? (static_cast<double>(totalMemoryBlocks) / memoryCount) : 0.0;
 
-        std::cout << "[User Statistics]\n";
+        std::cout << "[Memory Statistics]\n";
         std::cout << "  +--------------------------------------------------------+\n";
-        std::cout << "  | Active Users:   " << std::setw(6) << std::right << userCount
-                  << " users\n";
-        if (userCount > 0) {
-            std::cout << "  | Avg Blocks/User:" << std::fixed << std::setprecision(2)
-                      << std::setw(10) << std::right << avgUserBlocks << " blocks/user\n";
-            std::cout << "  | Max Usage:      " << std::setw(6) << std::right << maxUserBlocks
-                      << " blocks (" << std::setw(25) << std::left << maxUser << ")\n";
-            if (userCount > 1) {
-                std::cout << "  | Min Usage:      " << std::setw(6) << std::right << minUserBlocks
-                          << " blocks (" << std::setw(25) << std::left << minUser << ")\n";
+        std::cout << "  | Active Memories: " << std::setw(6) << std::right << memoryCount
+                  << " memories\n";
+        if (memoryCount > 0) {
+            std::cout << "  | Avg Blocks/Mem:  " << std::fixed << std::setprecision(2)
+                      << std::setw(10) << std::right << avgMemoryBlocks << " blocks/memory\n";
+            std::cout << "  | Max Usage:      " << std::setw(6) << std::right << maxMemoryBlocks
+                      << " blocks (" << std::setw(25) << std::left << maxMemoryId << ")\n";
+            if (memoryCount > 1) {
+                std::cout << "  | Min Usage:      " << std::setw(6) << std::right << minMemoryBlocks
+                          << " blocks (" << std::setw(25) << std::left << minMemoryId << ")\n";
             }
         }
         std::cout << "  +--------------------------------------------------------+\n";
@@ -389,8 +416,8 @@ void HandleCommand(const std::vector<std::string>& tokens, SharedMemoryPool& smp
                 << "  | [WARNING] Memory fragmentation detected, consider running 'compact'\n";
         }
 
-        if (userCount == 0) {
-            std::cout << "  | [INFO] No active users currently\n";
+        if (memoryCount == 0) {
+            std::cout << "  | [INFO] No active memories currently\n";
         }
         std::cout << "  +--------------------------------------------------------+\n";
         std::cout << "\n";
@@ -401,26 +428,32 @@ void HandleCommand(const std::vector<std::string>& tokens, SharedMemoryPool& smp
     // alloc 命令
     else if (cmd == "alloc") {
         if (tokens.size() < 3) {
-            std::cout << "Usage: alloc <user> \"<content>\"\n";
-            std::cout << "Example: alloc 192.168.1.100:54321 \"Hello World\"\n";
+            std::cout << "Usage: alloc \"<description>\" \"<content>\"\n";
+            std::cout << "Example: alloc \"User Data\" \"Hello World\"\n";
             return;
         }
 
-        std::string user = tokens[1];
+        // 解析 description 和 content（都是带引号的字符串）
+        std::string description = ParseQuotedString(tokens, 1);
         std::string content = ParseQuotedString(tokens, 2);
 
-        if (content.empty()) {
-            std::cout
-                << "Error: Invalid content format. Content must be enclosed in double quotes.\n";
-            std::cout << "Example: alloc " << user << " \"Hello World\"\n";
+        if (description.empty() || content.empty()) {
+            std::cout << "Error: Both description and content must be provided and enclosed in "
+                         "double quotes.\n";
+            std::cout << "Example: alloc \"User Data\" \"Hello World\"\n";
             return;
         }
 
+        // 自动生成 memory_id
+        std::string memory_id = smp.GenerateNextMemoryId();
+
         // 将 content 作为数据写入内存池
-        int blockId = smp.AllocateBlock(user, content.data(), content.size());
+        int blockId = smp.AllocateBlock(memory_id, description, content.data(), content.size());
 
         if (blockId >= 0) {
-            std::cout << "Allocation successful. Content stored at block " << blockId << "\n";
+            std::cout << "Allocation successful. Memory ID: " << memory_id << "\n";
+            std::cout << "Description: " << description << "\n";
+            std::cout << "Content stored at block " << blockId << "\n";
         } else {
             std::cout << "Allocation failed. Insufficient memory or invalid parameters.\n";
         }
@@ -430,29 +463,33 @@ void HandleCommand(const std::vector<std::string>& tokens, SharedMemoryPool& smp
     // read 命令
     else if (cmd == "read") {
         if (tokens.size() < 2) {
-            std::cout << "Usage: read <user>\n";
-            std::cout << "Example: read 192.168.1.100:54321\n";
+            std::cout << "Usage: read <memory_id>\n";
+            std::cout << "Example: read memory_00001\n";
             return;
         }
 
-        std::string user = tokens[1];
-        std::string content = smp.GetUserContentAsString(user);
+        std::string memory_id = tokens[1];
+        std::string content = smp.GetMemoryContentAsString(memory_id);
 
         if (content.empty()) {
-            std::cout << "User '" << user << "' has no allocated memory or content is empty.\n";
+            std::cout << "Memory ID '" << memory_id << "' not found or content is empty.\n";
             return;
         }
 
-        // 获取用户的块信息用于显示
-        const auto& userInfo = smp.GetUserBlockInfo();
-        auto it = userInfo.find(user);
-        if (it != userInfo.end()) {
+        // 获取内存的块信息和描述
+        const auto& memoryInfo = smp.GetMemoryInfo();
+        auto it = memoryInfo.find(memory_id);
+        if (it != memoryInfo.end()) {
             size_t startBlock = it->second.first;
             size_t blockCount = it->second.second;
-            std::cout << "User: " << user << "\n";
+            const auto& meta = smp.GetMeta(startBlock);
+            std::cout << "Memory ID: " << memory_id << "\n";
+            std::cout << "Description: " << meta.description << "\n";
             std::cout << "Blocks: " << startBlock << "-" << (startBlock + blockCount - 1) << "\n";
             std::cout << "Content: \"" << content << "\"\n";
             std::cout << "Size: " << content.size() << " bytes\n";
+            std::cout << "Last Modified: " << smp.GetMemoryLastModifiedTimeString(memory_id)
+                      << "\n";
         } else {
             std::cout << "Content: \"" << content << "\"\n";
             std::cout << "Size: " << content.size() << " bytes\n";
@@ -463,16 +500,16 @@ void HandleCommand(const std::vector<std::string>& tokens, SharedMemoryPool& smp
     // free/delete 命令
     else if (cmd == "free" || cmd == "delete") {
         if (tokens.size() < 2) {
-            std::cout << "Usage: " << cmd << " <user>\n";
-            std::cout << "Example: " << cmd << " 192.168.1.100:54321\n";
+            std::cout << "Usage: " << cmd << " <memory_id>\n";
+            std::cout << "Example: " << cmd << " memory_00001\n";
             return;
         }
 
-        std::string user = tokens[1];
-        if (smp.FreeByUser(user)) {
-            std::cout << "Memory freed successfully for user '" << user << "'\n";
+        std::string memory_id = tokens[1];
+        if (smp.FreeByMemoryId(memory_id)) {
+            std::cout << "Memory freed successfully for '" << memory_id << "'\n";
         } else {
-            std::cout << "User '" << user << "' has no allocated memory.\n";
+            std::cout << "Memory ID '" << memory_id << "' not found.\n";
         }
         return;
     }
@@ -480,34 +517,36 @@ void HandleCommand(const std::vector<std::string>& tokens, SharedMemoryPool& smp
     // update 命令
     else if (cmd == "update") {
         if (tokens.size() < 3) {
-            std::cout << "Usage: update <user> \"<new_content>\"\n";
-            std::cout << "Example: update 192.168.1.100:54321 \"New Content\"\n";
+            std::cout << "Usage: update <memory_id> \"<new_content>\"\n";
+            std::cout << "Example: update memory_00001 \"New Content\"\n";
             return;
         }
 
-        std::string user = tokens[1];
+        std::string memory_id = tokens[1];
         std::string newContent = ParseQuotedString(tokens, 2);
 
         if (newContent.empty()) {
             std::cout
                 << "Error: Invalid content format. Content must be enclosed in double quotes.\n";
-            std::cout << "Example: update " << user << " \"New Content\"\n";
+            std::cout << "Example: update " << memory_id << " \"New Content\"\n";
             return;
         }
 
-        // 检查用户是否存在
-        const auto& userInfo = smp.GetUserBlockInfo();
-        auto it = userInfo.find(user);
-        if (it == userInfo.end()) {
-            std::cout << "Error: User '" << user << "' has no allocated memory.\n";
+        // 检查内存ID是否存在
+        const auto& memoryInfo = smp.GetMemoryInfo();
+        auto it = memoryInfo.find(memory_id);
+        if (it == memoryInfo.end()) {
+            std::cout << "Error: Memory ID '" << memory_id << "' not found.\n";
             std::cout << "Use 'alloc' command to allocate memory first.\n";
             return;
         }
 
-        // 获取用户当前的块信息
+        // 获取内存当前的块信息和描述
         size_t startBlock = it->second.first;
         size_t currentBlockCount = it->second.second;
         size_t currentSize = currentBlockCount * SharedMemoryPool::kBlockSize;
+        const auto& meta = smp.GetMeta(startBlock);
+        std::string description = meta.description;
 
         // 计算新内容需要的块数
         size_t newSize = newContent.size();
@@ -517,9 +556,9 @@ void HandleCommand(const std::vector<std::string>& tokens, SharedMemoryPool& smp
         // 如果新内容大小超过原分配，需要重新分配
         if (newSize > currentSize) {
             // 先释放原内存
-            smp.FreeByUser(user);
-            // 重新分配
-            int blockId = smp.AllocateBlock(user, newContent.data(), newSize);
+            smp.FreeByMemoryId(memory_id);
+            // 重新分配（保持相同的 memory_id 和 description）
+            int blockId = smp.AllocateBlock(memory_id, description, newContent.data(), newSize);
             if (blockId >= 0) {
                 std::cout << "Content updated successfully. New content stored at block " << blockId
                           << "\n";
@@ -551,15 +590,18 @@ void HandleCommand(const std::vector<std::string>& tokens, SharedMemoryPool& smp
 
             // 如果新内容需要的块数少于原分配，释放后续不需要的块
             if (requiredBlockCount < currentBlockCount) {
-                // 先更新用户块信息中的块数量和 free_block_count
-                smp.UpdateUserBlockCount(user, requiredBlockCount);
+                // 先更新内存块信息中的块数量和 free_block_count
+                smp.UpdateMemoryBlockCount(memory_id, requiredBlockCount);
                 // 然后清理后续块的元数据和位图（不更新 free_block_count，因为已经通过
-                // UpdateUserBlockCount 更新了）
+                // UpdateMemoryBlockCount 更新了）
                 for (size_t i = requiredBlockCount; i < currentBlockCount; ++i) {
                     size_t blockId = startBlock + i;
                     smp.ClearBlockMeta(blockId);
                 }
             }
+
+            // 更新最后修改时间
+            smp.UpdateMemoryLastModifiedTime(memory_id);
 
             std::cout << "Content updated successfully.\n";
         }

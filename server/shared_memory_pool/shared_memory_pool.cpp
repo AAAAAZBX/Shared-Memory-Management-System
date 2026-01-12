@@ -27,39 +27,43 @@ void SharedMemoryPool::Reset() {
     for (auto& m : meta_) {
         m = BlockMeta{};
     }
-    user_block_info.clear();
-    user_last_modified_time.clear(); // Clear last modified times
+    memory_info.clear();
+    memory_last_modified_time.clear(); // Clear last modified times
 }
 
 // 设置元数据
-bool SharedMemoryPool::SetMeta(size_t blockId, const std::string& user) {
+bool SharedMemoryPool::SetMeta(size_t blockId, const std::string& memory_id,
+                               const std::string& description) {
     if (used_map[blockId])
         return false;
     auto& m = meta_[blockId];
     m.used = true;
-    m.user = user;
+    m.memory_id = memory_id;
+    m.description = description;
     free_block_count--;
     used_map.set(blockId, true);
     return true;
 }
 
 // 设置元数据（加载时使用）
-void SharedMemoryPool::SetMetaForLoad(size_t blockId, const std::string& user) {
+void SharedMemoryPool::SetMetaForLoad(size_t blockId, const std::string& memory_id,
+                                      const std::string& description) {
     auto& m = meta_[blockId];
     m.used = true;
-    m.user = user;
+    m.memory_id = memory_id;
+    m.description = description;
     // 不修改 free_block_count 和 used_map，因为这些已经在加载时设置好了
 }
 
-// 获取用户块信息
-const std::map<std::string, std::pair<size_t, size_t>>& SharedMemoryPool::GetUserBlockInfo() const {
-    return user_block_info;
+// 获取内存块信息
+const std::map<std::string, std::pair<size_t, size_t>>& SharedMemoryPool::GetMemoryInfo() const {
+    return memory_info;
 }
 
-// 更新用户块数量
-void SharedMemoryPool::UpdateUserBlockCount(const std::string& user, size_t newBlockCount) {
-    auto it = user_block_info.find(user);
-    if (it != user_block_info.end()) {
+// 更新内存块数量
+void SharedMemoryPool::UpdateMemoryBlockCount(const std::string& memory_id, size_t newBlockCount) {
+    auto it = memory_info.find(memory_id);
+    if (it != memory_info.end()) {
         size_t oldBlockCount = it->second.second;
         it->second.second = newBlockCount;
         // 更新空闲块计数
@@ -69,8 +73,27 @@ void SharedMemoryPool::UpdateUserBlockCount(const std::string& user, size_t newB
             free_block_count -= (newBlockCount - oldBlockCount);
         }
         // 更新最后修改时间
-        user_last_modified_time[user] = std::time(nullptr);
+        memory_last_modified_time[memory_id] = std::time(nullptr);
     }
+}
+
+// 生成下一个可用的 memory_id
+std::string SharedMemoryPool::GenerateNextMemoryId() const {
+    int maxId = 0;
+    for (const auto& entry : memory_info) {
+        const std::string& id = entry.first;
+        if (id.length() > 7 && id.substr(0, 7) == "memory_") {
+            try {
+                int currentId = std::stoi(id.substr(7));
+                maxId = std::max(maxId, currentId);
+            } catch (...) {
+                // 忽略解析错误
+            }
+        }
+    }
+    std::ostringstream oss;
+    oss << "memory_" << std::setfill('0') << std::setw(5) << (maxId + 1);
+    return oss.str();
 }
 
 // 获取块元数据
@@ -133,17 +156,23 @@ void SharedMemoryPool::Compact() {
                 // 更新 used_map
                 used_map.set(freePos, true);
                 used_map.set(i, false);
-                user_block_info[meta_[freePos].user].first =
-                    std::min(user_block_info[meta_[freePos].user].first, freePos);
+                // 更新内存信息中的起始块位置
+                if (!meta_[freePos].memory_id.empty()) {
+                    auto it = memory_info.find(meta_[freePos].memory_id);
+                    if (it != memory_info.end()) {
+                        it->second.first = freePos;
+                    }
+                }
             }
             freePos++;
         }
     }
 }
 
-// 分配内存（单用户单内存）
-int SharedMemoryPool::AllocateBlock(const std::string& user, const void* data, size_t dataSize) {
-    if (dataSize == 0 || user.empty() || data == nullptr) {
+// 分配内存
+int SharedMemoryPool::AllocateBlock(const std::string& memory_id, const std::string& description,
+                                    const void* data, size_t dataSize) {
+    if (dataSize == 0 || memory_id.empty() || data == nullptr) {
         return -1;
     }
 
@@ -187,34 +216,35 @@ int SharedMemoryPool::AllocateBlock(const std::string& user, const void* data, s
 
         // 设置元数据
         meta_[blockId].used = true;
-        meta_[blockId].user = user;
+        meta_[blockId].memory_id = memory_id;
+        meta_[blockId].description = description;
         used_map.set(blockId, true);
         free_block_count--;
 
         bytesWritten += bytesToWrite;
     }
 
-    user_block_info[user].first = startBlock;
-    user_block_info[user].second = requiredBlocks;
+    memory_info[memory_id].first = startBlock;
+    memory_info[memory_id].second = requiredBlocks;
     // 更新最后修改时间
-    user_last_modified_time[user] = std::time(nullptr);
+    memory_last_modified_time[memory_id] = std::time(nullptr);
 
     return startBlock;
 }
 
-// 释放用户所有内存
-bool SharedMemoryPool::FreeByUser(const std::string& user) {
-    if (user_block_info.find(user) == user_block_info.end())
+// 释放指定内存ID的所有内存
+bool SharedMemoryPool::FreeByMemoryId(const std::string& memory_id) {
+    if (memory_info.find(memory_id) == memory_info.end())
         return false;
-    const auto& blockInfo = user_block_info[user];
+    const auto& blockInfo = memory_info[memory_id];
     size_t start = blockInfo.first;
     size_t count = blockInfo.second;
     for (size_t i = start; i < start + count; i++) {
         used_map.set(i, false);
         meta_[i] = BlockMeta{};
     }
-    user_block_info.erase(user);
-    user_last_modified_time.erase(user); // 删除最后修改时间记录
+    memory_info.erase(memory_id);
+    memory_last_modified_time.erase(memory_id); // 删除最后修改时间记录
     free_block_count += count;
     return true;
 }
@@ -233,21 +263,22 @@ bool SharedMemoryPool::FreeByBlockId(size_t blockId) {
 void SharedMemoryPool::ClearBlockMeta(size_t blockId) {
     used_map.set(blockId, false);
     meta_[blockId].used = false;
-    meta_[blockId].user.clear();
+    meta_[blockId].memory_id.clear();
+    meta_[blockId].description.clear();
 }
 
-// 获取用户最后修改时间
-time_t SharedMemoryPool::GetUserLastModifiedTime(const std::string& user) const {
-    auto it = user_last_modified_time.find(user);
-    if (it != user_last_modified_time.end()) {
+// 获取内存最后修改时间
+time_t SharedMemoryPool::GetMemoryLastModifiedTime(const std::string& memory_id) const {
+    auto it = memory_last_modified_time.find(memory_id);
+    if (it != memory_last_modified_time.end()) {
         return it->second;
     }
     return 0; // 返回0表示没有记录
 }
 
-// 获取用户最后修改时间字符串
-std::string SharedMemoryPool::GetUserLastModifiedTimeString(const std::string& user) const {
-    time_t timeValue = GetUserLastModifiedTime(user);
+// 获取内存最后修改时间字符串
+std::string SharedMemoryPool::GetMemoryLastModifiedTimeString(const std::string& memory_id) const {
+    time_t timeValue = GetMemoryLastModifiedTime(memory_id);
     if (timeValue == 0) {
         return "N/A";
     }
@@ -262,12 +293,12 @@ std::string SharedMemoryPool::GetUserLastModifiedTimeString(const std::string& u
     return oss.str();
 }
 
-// 获取用户内容字符串
-std::string SharedMemoryPool::GetUserContentAsString(const std::string& user) const {
-    // 查找用户的块信息
-    auto it = user_block_info.find(user);
-    if (it == user_block_info.end()) {
-        return ""; // 用户没有分配内存
+// 获取内存内容字符串
+std::string SharedMemoryPool::GetMemoryContentAsString(const std::string& memory_id) const {
+    // 查找内存的块信息
+    auto it = memory_info.find(memory_id);
+    if (it == memory_info.end()) {
+        return ""; // 内存ID不存在
     }
 
     size_t startBlock = it->second.first;

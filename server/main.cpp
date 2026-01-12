@@ -107,6 +107,7 @@ int main() {
         }
 
         HandleCommand(tokens, smp);
+        std::cout << std::endl;
     }
 
     g_smp = nullptr;
