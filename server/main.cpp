@@ -1,6 +1,7 @@
 #include "command/commands.h"
 #include "shared_memory_pool/shared_memory_pool.h"
 #include "persistence/persistence.h"
+#include "network/tcp_server.h"
 #include <iostream>
 #include <sstream>
 #include <vector>
@@ -9,8 +10,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <algorithm>
+#include <thread>
 
-#ifdef _WIN32
 #ifndef _WIN32_WINNT
 #define _WIN32_WINNT 0x0600 // Windows Vista or later for inet_ntop
 #endif
@@ -18,20 +19,17 @@
 #include <ws2tcpip.h>
 // Note: ws2_32.lib must be linked via -lws2_32 compiler flag
 // #pragma comment doesn't work with MinGW
-#else
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <netdb.h>
-#include <ifaddrs.h>
-#include <unistd.h>
-#endif
 
 static SharedMemoryPool* g_smp = nullptr;
+static TCPServer* g_tcp_server = nullptr;
 
 void SignalHandler(int signal) {
+    if (g_tcp_server != nullptr) {
+        std::cerr << "\n\nStopping TCP server...\n";
+        g_tcp_server->Stop();
+    }
     if (g_smp != nullptr) {
-        std::cerr << "\n\nReceived signal " << signal << ", saving data...\n";
+        std::cerr << "Saving data...\n";
         if (Persistence::Save(*g_smp)) {
             std::cerr << "Data saved successfully.\n";
         } else {
@@ -232,9 +230,7 @@ int main() {
     // 注册信号处理器
     std::signal(SIGINT, SignalHandler);
     std::signal(SIGTERM, SignalHandler);
-#ifdef _WIN32
     std::signal(SIGBREAK, SignalHandler);
-#endif
 
     // 先初始化内存池（分配内存空间）
     if (!smp.Init()) {
@@ -254,7 +250,21 @@ int main() {
     const uint16_t kDefaultPort = 8888;
     PrintServerConnectionInfo(kDefaultPort);
 
-    std::cout << "RemoteMem Server (toy) - type 'help'\n";
+    // 创建并启动 TCP 服务器（在后台线程中运行）
+    TCPServer tcpServer(smp, kDefaultPort);
+    g_tcp_server = &tcpServer;
+
+    std::thread tcpServerThread([&tcpServer]() {
+        if (!tcpServer.Start()) {
+            std::cerr << "Failed to start TCP server on port " << kDefaultPort << "\n";
+        }
+    });
+
+    // 分离线程，让它在后台运行
+    tcpServerThread.detach();
+
+    std::cout << "Shared Memory Management Server - type 'help' for commands\n";
+    std::cout << "TCP server is listening on port " << kDefaultPort << " for client connections.\n";
     std::cout.flush();
 
     std::string line;
@@ -290,6 +300,10 @@ int main() {
         }
 
         if (tokens[0] == "quit" || tokens[0] == "exit") {
+            std::cout << "Stopping TCP server...\n";
+            if (g_tcp_server != nullptr) {
+                g_tcp_server->Stop();
+            }
             std::cout << "Saving data...\n";
             if (Persistence::Save(smp)) {
                 std::cout << "Data saved successfully.\n";
@@ -304,6 +318,8 @@ int main() {
         std::cout << std::endl;
     }
 
+    // 清理
+    g_tcp_server = nullptr;
     g_smp = nullptr;
     return 0;
 }

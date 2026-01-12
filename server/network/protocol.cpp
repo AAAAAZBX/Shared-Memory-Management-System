@@ -3,31 +3,18 @@
 #include <cstring>
 #include <sstream>
 #include <iomanip>
-
-#ifdef _WIN32
 #include <winsock2.h>
 #include <ws2tcpip.h>
-#else
-#include <arpa/inet.h>
-#endif
 
 namespace Protocol {
 
 // 网络字节序转换（大端序）
 static uint32_t HostToNetwork32(uint32_t value) {
-#ifdef _WIN32
     return htonl(value);
-#else
-    return htonl(value);
-#endif
 }
 
 static uint32_t NetworkToHost32(uint32_t value) {
-#ifdef _WIN32
     return ntohl(value);
-#else
-    return ntohl(value);
-#endif
 }
 
 std::vector<uint8_t> SerializeRequest(const Request& req) {

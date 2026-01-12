@@ -8,16 +8,20 @@
 #include <vector>
 #include <memory>
 
-#ifdef _WIN32
+// 在包含 Windows 头文件之前，取消定义可能冲突的宏
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
 #include <winsock2.h>
 #include <ws2tcpip.h>
-#pragma comment(lib, "ws2_32.lib")
-#else
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <unistd.h>
+// 取消定义 Windows 头文件中可能冲突的宏
+#ifdef DELETE
+#undef DELETE
 #endif
+#ifdef ERROR_NOT_FOUND
+#undef ERROR_NOT_FOUND
+#endif
+#pragma comment(lib, "ws2_32.lib")
 
 class TCPServer {
   public:

@@ -5,25 +5,19 @@
 #include <cstring>
 #include <algorithm>
 
-#ifdef _WIN32
 typedef int socklen_t;
 #define close closesocket
 #define SHUT_RDWR SD_BOTH
-#endif
 
 TCPServer::TCPServer(SharedMemoryPool& smp, uint16_t port)
     : smp_(smp), port_(port), listenSocket_(INVALID_SOCKET), running_(false) {
-#ifdef _WIN32
     WSADATA wsaData;
     WSAStartup(MAKEWORD(2, 2), &wsaData);
-#endif
 }
 
 TCPServer::~TCPServer() {
     Stop();
-#ifdef _WIN32
     WSACleanup();
-#endif
 }
 
 bool TCPServer::Start() {
@@ -40,12 +34,8 @@ bool TCPServer::Start() {
 
     // 设置套接字选项（允许地址重用）
     int opt = 1;
-#ifdef _WIN32
     setsockopt(listenSocket_, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&opt),
                sizeof(opt));
-#else
-    setsockopt(listenSocket_, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-#endif
 
     // 绑定地址
     sockaddr_in serverAddr{};
@@ -87,7 +77,14 @@ bool TCPServer::Start() {
 
         // 获取客户端IP和端口
         char ipStr[INET_ADDRSTRLEN];
-        inet_ntop(AF_INET, &clientAddr.sin_addr, ipStr, INET_ADDRSTRLEN);
+        // Windows 上使用 inet_ntoa（更兼容）
+        const char* ipCStr = inet_ntoa(clientAddr.sin_addr);
+        if (ipCStr != nullptr) {
+            std::strncpy(ipStr, ipCStr, INET_ADDRSTRLEN - 1);
+            ipStr[INET_ADDRSTRLEN - 1] = '\0';
+        } else {
+            std::strcpy(ipStr, "unknown");
+        }
         uint16_t clientPort = ntohs(clientAddr.sin_port);
         std::string clientIP(ipStr);
         std::string clientInfo = clientIP + ":" + std::to_string(clientPort);
