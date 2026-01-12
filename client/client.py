@@ -62,6 +62,12 @@ class MemoryClient:
             return True
         except Exception as e:
             print(f"Failed to connect: {e}")
+            if self.sock:
+                try:
+                    self.sock.close()
+                except:
+                    pass
+                self.sock = None
             return False
     
     def disconnect(self):
@@ -250,7 +256,8 @@ class MemoryClient:
     
     def __enter__(self):
         """上下文管理器入口"""
-        self.connect()
+        if not self.connect():
+            raise RuntimeError(f"Failed to connect to server {self.host}:{self.port}")
         return self
     
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -261,42 +268,51 @@ class MemoryClient:
 def main():
     """示例用法"""
     # 使用上下文管理器（推荐）
-    with MemoryClient("172.29.58.145", 8888) as client:
-        # 心跳检测
-        print("=" * 50)
-        print("Testing PING...")
-        client.ping()
-        
-        # 分配内存
-        print("\n" + "=" * 50)
-        print("Testing ALLOC...")
-        memory_id = client.alloc("Test Data", "Hello, World!")
-        
-        if memory_id:
-            # 读取内存
-            print("\n" + "=" * 50)
-            print("Testing READ...")
-            client.read(memory_id)
+    # 注意：如果服务器未运行，会抛出异常
+    try:
+        with MemoryClient("172.29.57.127", 8888) as client:
+            # 心跳检测
+            print("=" * 50)
+            print("Testing PING...")
+            client.ping()
             
-            # 更新内存
+            # 分配内存
             print("\n" + "=" * 50)
-            print("Testing UPDATE...")
-            client.update(memory_id, "Updated content!")
+            print("Testing ALLOC...")
+            memory_id = client.alloc("Local Client", "Hello, World!")
             
-            # 再次读取
-            print("\n" + "=" * 50)
-            print("Testing READ after UPDATE...")
-            client.read(memory_id)
-            
-            # 查询状态
-            print("\n" + "=" * 50)
-            print("Testing STATUS...")
-            client.status()
-            
-            # 删除内存（可选）
-            # print("\n" + "=" * 50)
-            # print("Testing DELETE...")
-            # client.delete(memory_id)
+            if memory_id:
+                # 读取内存
+                print("\n" + "=" * 50)
+                print("Testing READ...")
+                client.read(memory_id)
+                
+                # 更新内存
+                print("\n" + "=" * 50)
+                print("Testing UPDATE...")
+                client.update(memory_id, "Updated content!")
+                
+                # 再次读取
+                print("\n" + "=" * 50)
+                print("Testing READ after UPDATE...")
+                client.read(memory_id)
+                
+                # 查询状态
+                print("\n" + "=" * 50)
+                print("Testing STATUS...")
+                client.status()
+                
+                # 删除内存（可选）
+                # print("\n" + "=" * 50)
+                # print("Testing DELETE...")
+                # client.delete(memory_id)
+    except RuntimeError as e:
+        print(f"\nError: {e}")
+        print("\nPlease make sure the server is running:")
+        print("  1. Start the server: cd server && .\\run.bat")
+        print("  2. Check the server IP and port")
+        print("  3. Verify firewall settings")
+        return
     
     # 或者手动管理连接
     # client = MemoryClient("127.0.0.1", 8888)
