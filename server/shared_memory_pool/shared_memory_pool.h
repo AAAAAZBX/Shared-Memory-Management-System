@@ -10,9 +10,9 @@
 
 class SharedMemoryPool {
   public:
-    static constexpr size_t kPoolSize = 1024 * 1024;              // 1MB
+    static constexpr size_t kPoolSize = 1024 * 1024 * 100;        // 2GB
     static constexpr size_t kBlockSize = 4096;                    // 4KB
-    static constexpr size_t kBlockCount = kPoolSize / kBlockSize; // 256
+    static constexpr size_t kBlockCount = kPoolSize / kBlockSize; // 512K块
 
     struct BlockMeta {
         bool used = false;     // 是否被使用
