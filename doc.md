@@ -166,22 +166,25 @@ Shared-Memory-Manage-System/
 #### 内存池模块 (`shared_memory_pool`)
 - **职责**：管理固定大小的内存块分配
 - **核心类**：`SharedMemoryPool`
-- **数据结构**：`pool_`（1MB内存）、`meta_`（元数据数组）、`used_map`（位图）、`user_block_info`（用户映射表）
+- **数据结构**：`pool_`（100MB内存）、`meta_`（元数据数组）、`used_map`（位图）、`memory_info`（内存块映射表）
 
 #### 命令处理模块 (`command`)
 - **职责**：解析和执行用户命令
 - **核心函数**：`HandleCommand()`
-- **支持命令**：help、status、alloc、read、free/delete、update、exec、compact、reset、quit
+- **支持命令**：help、status、alloc、read、free/delete、update、exec、compact、reset、quit、info
+- **Memory ID 系统**：使用 `memory_00001`, `memory_00002` 等唯一标识符，不再使用用户身份
 
 #### 持久化模块 (`persistence`)
 - **职责**：序列化/反序列化内存池状态
 - **核心函数**：`Persistence::Save()` / `Load()`
-- **文件格式**：二进制格式，包含文件头、元数据、位图、用户信息、内存池数据
+- **文件格式**：二进制格式（版本3），包含文件头、元数据、位图、内存块信息、最后修改时间、内存池数据
+- **版本兼容**：支持加载版本1和版本2的旧文件
 
 #### 网络模块 (`network`)
 - **职责**：TCP 服务器，处理客户端连接（开发中）
 - **核心类**：`TCPServer`
 - **协议**：自定义二进制协议
+- **注意**：网络模块设计时使用 IP:Port 作为用户标识，但当前版本已改为 Memory ID 系统，需要更新
 
 ### 1.3 数据流
 
@@ -211,9 +214,9 @@ AllocateBlock() → 计算所需块数 → 查找连续空闲块 →
 
 #### 核心常量
 ```cpp
-static constexpr size_t kPoolSize = 1024 * 1024;    // 1MB
-static constexpr size_t kBlockSize = 4096;          // 4KB
-static constexpr size_t kBlockCount = 256;          // 256 块
+static constexpr size_t kPoolSize = 1024 * 1024 * 100;  // 100MB
+static constexpr size_t kBlockSize = 4096;               // 4KB
+static constexpr size_t kBlockCount = kPoolSize / kBlockSize;  // 25,600 块
 ```
 
 #### 关键API
@@ -223,26 +226,27 @@ static constexpr size_t kBlockCount = 256;          // 256 块
 - `void Reset()`：清空所有数据，恢复到初始状态
 
 **内存分配**
-- `int AllocateBlock(const std::string& user, const void* data, size_t dataSize)`
-  - 为指定用户分配内存并写入数据
+- `int AllocateBlock(const std::string& memory_id, const std::string& description, const void* data, size_t dataSize)`
+  - 为指定 Memory ID 分配内存并写入数据
   - 返回：起始块 ID（成功）或 -1（失败）
   - 自动计算所需块数，空间不足时触发紧凑
+- `std::string GenerateNextMemoryId()`：生成下一个可用的 Memory ID（memory_00001, memory_00002, ...）
 
 **内存释放**
-- `bool FreeByUser(const std::string& user)`：释放指定用户的所有内存
+- `bool FreeByMemoryId(const std::string& memory_id)`：释放指定 Memory ID 的所有内存
 - `bool FreeByBlockId(size_t blockId)`：释放指定块的内存
 
 **内容更新**
 - 通过 `update` 命令实现，支持两种模式：
   - 新内容大小 ≤ 原分配：直接覆盖写入，剩余部分清零
-  - 新内容大小 > 原分配：先释放原内存，再重新分配
+  - 新内容大小 > 原分配：先释放原内存，再重新分配（保持相同的 Memory ID 和描述）
 
 **查询接口**
 - `const BlockMeta& GetMeta(size_t blockId)`：获取块的元数据
-- `const std::map<std::string, std::pair<size_t, size_t>>& GetUserBlockInfo()`：获取用户块映射表
-- `std::string GetUserContentAsString(const std::string& user)`：读取用户内容（遇到0停止）
-- `time_t GetUserLastModifiedTime(const std::string& user)`：获取用户最后修改时间戳
-- `std::string GetUserLastModifiedTimeString(const std::string& user)`：获取用户最后修改时间字符串（格式：YYYY-MM-DD HH:MM:SS）
+- `const std::map<std::string, std::pair<size_t, size_t>>& GetMemoryInfo()`：获取内存块映射表
+- `std::string GetMemoryContentAsString(const std::string& memory_id)`：读取内存内容（遇到0停止）
+- `time_t GetMemoryLastModifiedTime(const std::string& memory_id)`：获取内存最后修改时间戳
+- `std::string GetMemoryLastModifiedTimeString(const std::string& memory_id)`：获取内存最后修改时间字符串（格式：YYYY-MM-DD HH:MM:SS）
 
 **工具方法**
 - `void Compact()`：紧凑内存，合并碎片，将所有已使用的块移动到前端
@@ -268,12 +272,13 @@ struct CommandSpec {
 #### 支持的命令
 
 - **help [command]**：显示帮助信息
-- **status [--memory|--block]**：显示内存池状态，包含最后修改时间信息
-- **alloc <user> "<content>"**：分配内存
-- **read <user>**：读取用户内容
-- **free <user>**：释放指定用户的内存
-- **delete <user>**：释放指定用户的内存（`free` 的别名）
-- **update <user> "<new_content>"**：更新用户内容
+- **status [--memory|--block]**：显示内存池状态，包含 Memory ID、描述和最后修改时间
+- **info**：显示系统综合信息
+- **alloc "<description>" "<content>"**：分配内存，自动生成 Memory ID
+- **read <memory_id>**：读取指定 Memory ID 的内容
+- **free <memory_id>**：释放指定 Memory ID 的内存
+- **delete <memory_id>**：释放指定 Memory ID 的内存（`free` 的别名）
+- **update <memory_id> "<new_content>"**：更新指定 Memory ID 的内容
 - **exec <filename>**：从文件批量执行命令
 - **compact**：紧凑内存
 - **reset**：重置内存池（需要密码确认）
@@ -300,25 +305,28 @@ struct CommandSpec {
 **文件头结构**（48 字节）：
 ```cpp
 struct FileHeader {
-    uint32_t magic;          // 魔数 "MEMP" (0x4D454D50)
-    uint32_t version;        // 版本号 (1: 基础版本, 2: 包含时间信息)
-    size_t free_block_count; // 空闲块数量
-    size_t user_info_count;  // 用户信息条目数
-    uint64_t reserved[4];    // 预留字段
+    uint32_t magic;             // 魔数 "MEMP" (0x4D454D50)
+    uint32_t version;           // 版本号 (1: 基础版本, 2: 包含时间信息, 3: Memory ID 系统)
+    size_t free_block_count;    // 空闲块数量
+    size_t memory_info_count;  // 内存信息条目数（版本3），或 user_info_count（版本1/2）
+    uint64_t reserved[4];       // 预留字段
 };
 ```
 
 **文件内容顺序**：
 1. 文件头（48 字节）
-2. 元数据数组（256 个块）
-3. 使用状态位图（32 字节）
-4. 用户块信息映射
-5. 用户最后修改时间映射（版本2新增）
-6. 内存池数据（1MB）
+2. 元数据数组（kBlockCount 个块）
+   - 版本3：包含 memory_id 和 description
+   - 版本1/2：包含 user（向后兼容）
+3. 使用状态位图
+4. 内存块信息映射（版本3）或用户块信息映射（版本1/2）
+5. 最后修改时间映射（版本2/3）
+6. 内存池数据（kPoolSize 字节，当前为 100MB）
 
 **版本兼容性**：
-- 版本1：不包含用户最后修改时间信息
+- 版本1：基础版本，不包含时间信息
 - 版本2：包含用户最后修改时间信息，支持向后兼容（可加载版本1文件）
+- 版本3：使用 Memory ID 和描述系统，支持向后兼容（可加载版本1和版本2文件）
 
 #### 核心API
 
@@ -343,7 +351,8 @@ struct FileHeader {
 **网络协议**：
 - 请求格式：`[命令类型: 1字节] [数据长度: 4字节] [数据内容: N字节]`
 - 响应格式：`[状态码: 1字节] [数据长度: 4字节] [响应数据: N字节]`
-- 命令类型：ALLOC(0x01)、UPDATE(0x02)、DELETE(0x03)、READ(0x04)
+- 命令类型：ALLOC(0x01)、UPDATE(0x02)、DELETE(0x03)、READ(0x04)、STATUS(0x05)、PING(0x06)
+- **注意**：网络模块设计时使用 IP:Port 作为用户标识，但当前版本已改为 Memory ID 系统，需要更新协议以支持 Memory ID
 
 ---
 
@@ -354,13 +363,14 @@ struct FileHeader {
 #### BlockMeta 结构
 ```cpp
 struct BlockMeta {
-    bool used = false;        // 是否被使用
-    std::string user = "";    // 用户标识（IP:端口号）
+    bool used = false;           // 是否被使用
+    std::string memory_id = "";  // 内存ID（memory_00001, memory_00002, ...）
+    std::string description = ""; // 内容描述
 };
 ```
 
 **时间信息管理**：
-系统还维护 `user_last_modified_time` 映射（`std::map<std::string, time_t>`），记录每个用户最后修改内存的时间戳。该信息在 `alloc`、`update` 操作时自动更新，并在 `status` 命令中显示。
+系统还维护 `memory_last_modified_time` 映射（`std::map<std::string, time_t>`），记录每个 Memory ID 最后修改内存的时间戳。该信息在 `alloc`、`update` 操作时自动更新，并在 `status` 命令中显示。
 
 #### 内存池布局
 ```
@@ -373,11 +383,11 @@ struct BlockMeta {
 
 #### 核心数据结构
 
-- **`pool_`**：`std::vector<uint8_t>`，1MB 连续内存空间
-- **`meta_`**：`std::array<BlockMeta, 256>`，256 个块的元数据
-- **`used_map`**：`std::bitset<256>`，使用状态位图（32 字节）
-- **`user_block_info`**：`std::map<std::string, std::pair<size_t, size_t>>`，用户块映射表
-- **`user_last_modified_time`**：`std::map<std::string, time_t>`，记录每个用户最后修改内存的时间戳
+- **`pool_`**：`std::vector<uint8_t>`，100MB 连续内存空间
+- **`meta_`**：`std::array<BlockMeta, kBlockCount>`，25,600 个块的元数据
+- **`used_map`**：`std::bitset<kBlockCount>`，使用状态位图
+- **`memory_info`**：`std::map<std::string, std::pair<size_t, size_t>>`，内存块映射表（key 为 Memory ID）
+- **`memory_last_modified_time`**：`std::map<std::string, time_t>`，记录每个 Memory ID 最后修改内存的时间戳
 
 ### 3.2 核心算法
 
@@ -478,11 +488,11 @@ static constexpr size_t kPoolSize = 1024 * 1024 * 1024;  // 1GB
 | 查询 | O(1)       | O(1)       |
 
 **空间占用**：
-- 内存池：1MB（固定）
-- 元数据：~8KB
-- 位图：32 字节
-- 用户映射表：O(m)，m 为用户数
-- 总计：~1.01MB
+- 内存池：100MB（固定）
+- 元数据：~100KB（取决于描述长度）
+- 位图：~3.2KB
+- 内存映射表：O(m)，m 为内存块数
+- 总计：~100.1MB
 
 ### 常见问题
 

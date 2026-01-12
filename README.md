@@ -7,44 +7,47 @@
 ## 核心特性
 
 ### 内存管理
-- **固定块大小管理**：将内存池划分为 256 个 4KB 的固定大小块（当前配置为 1MB 内存池）
+- **固定块大小管理**：将内存池划分为 256 个 4KB 的固定大小块（当前配置为 100MB 内存池）
 - **连续块分配**：支持跨多个块的数据存储，自动计算所需块数
 - **内存紧凑（Compaction）**：当找不到连续空闲块但总空间足够时，自动进行内存紧凑，合并碎片
-- **元数据管理**：每个块维护使用状态、用户标识和内容标识
+- **Memory ID 标识**：使用 `memory_00001`, `memory_00002` 等唯一标识符区分不同的内存块
+- **内容描述**：每个内存块都有描述信息，方便识别和管理
 
 ### 已实现功能
 
 #### 1. 内存池初始化与重置
-- 自动分配 1MB 连续内存空间
+- 自动分配 100MB 连续内存空间（25,600 个 4KB 块）
 - 支持内存池重置，清空所有分配信息
 
 #### 2. 内存分配（`alloc`）
-- 支持按用户和内容标识分配内存
+- `alloc "<description>" "<content>"`：分配内存并指定描述信息
+- 自动生成 Memory ID（`memory_00001`, `memory_00002`, ...）
 - 自动计算所需块数（向上取整）
 - 空间不足时自动触发紧凑操作
-- 返回分配的起始块 ID
+- 返回分配的 Memory ID 和起始块 ID
 
 #### 3. 内存释放（`free` / `delete`）
-- `free <user>`：释放指定用户的所有内存块
-- `delete <user>`：释放指定用户的所有内存块（`free` 的别名）
+- `free <memory_id>`：释放指定 Memory ID 的所有内存块
+- `delete <memory_id>`：释放指定 Memory ID 的所有内存块（`free` 的别名）
 
 #### 4. 内容更新（`update`）
-- `update <user> "<new_content>"`：更新指定用户的内存内容
+- `update <memory_id> "<new_content>"`：更新指定 Memory ID 的内存内容
 - 如果新内容大小超过原分配，自动重新分配
 - 如果新内容大小不超过原分配，直接覆盖写入
+- 保持原有的 Memory ID 和描述信息
 
 #### 5. 内存紧凑（`compact`）
 - 自动合并碎片，将已使用的块移动到内存池前端
-- 更新用户块信息映射关系
+- 更新内存块信息映射关系
 
 #### 6. 状态查询（`status`）
-- `status --memory`：显示内存池使用情况，按用户展示占用范围（格式：`block_000 - block_015`），包含最后修改时间
-- `status --block`：显示所有 256 个块的状态，包括占用客户端信息和最后修改时间（格式：`block_000`, `block_001` 等）
+- `status --memory`：显示内存池使用情况，按 Memory ID 展示占用范围（格式：`block_000 - block_015`），包含 Memory ID、描述和最后修改时间
+- `status --block`：只显示已使用的块，包括 Memory ID、描述和最后修改时间（格式：`block_000`, `block_001` 等）
 
 #### 7. 内容读取（`read`）
-- `read <user>`：显示指定用户写入的内容
+- `read <memory_id>`：显示指定 Memory ID 的内容
 - 直接从内存池读取，遇到 0 停止
-- 显示块范围、内容和大小
+- 显示 Memory ID、描述、块范围、内容和大小
 
 #### 8. 命令行界面
 - 交互式 REPL（Read-Eval-Print Loop）界面
@@ -79,24 +82,25 @@
 - 内存块的分配与释放
 - 元数据维护（`BlockMeta`）
 - 空闲块追踪（`bitset`）
-- 用户分配信息映射（`map<string, pair<size_t, size_t>>`）
+- 内存分配信息映射（`map<string, pair<size_t, size_t>>`，key 为 Memory ID）
 
 #### 关键数据结构
 ```cpp
 struct BlockMeta {
-    bool used;           // 是否被使用
-    std::string user;    // 用户标识（IP:端口号）
+    bool used;              // 是否被使用
+    std::string memory_id;  // 内存ID（memory_00001, memory_00002, ...）
+    std::string description; // 内容描述
 };
 ```
-注意：系统还维护 `user_last_modified_time` 映射（`map<string, time_t>`），记录每个用户最后修改内存的时间戳，用于在 `status` 命令中显示。
+注意：系统还维护 `memory_last_modified_time` 映射（`map<string, time_t>`），记录每个 Memory ID 最后修改内存的时间戳，用于在 `status` 命令中显示。
 
 ### 内存布局
 ```
 ┌─────────────────────────────────────────┐
-│  Memory Pool (1MB = 256 × 4KB blocks)  │
+│  Memory Pool (100MB = 25,600 × 4KB blocks)  │
 ├─────────────────────────────────────────┤
-│ Block 0   │ Block 1   │ ... │ Block 255 │
-│ (4KB)     │ (4KB)     │     │ (4KB)     │
+│ Block 0   │ Block 1   │ ... │ Block 25599 │
+│ (4KB)     │ (4KB)     │     │ (4KB)       │
 └─────────────────────────────────────────┘
 ```
 
@@ -110,32 +114,38 @@ struct BlockMeta {
 ┌─────────────────────────────────────────────────────────┐
 │ 1. FileHeader (文件头)                                    │
 │    - magic: uint32_t (0x4D454D50, "MEMP")                │
-│    - version: uint32_t (当前版本: 1)                      │
+│    - version: uint32_t (当前版本: 3)                      │
 │    - free_block_count: size_t (空闲块数量)                │
-│    - user_info_count: size_t (用户信息条目数)             │
+│    - memory_info_count: size_t (内存信息条目数)           │
 │    - reserved: uint64_t[4] (预留字段)                    │
 ├─────────────────────────────────────────────────────────┤
-│ 2. BlockMeta Array (元数据数组，256个块)                  │
+│ 2. BlockMeta Array (元数据数组，25,600个块)              │
 │    对每个块 i (0-255):                                    │
 │    - used: bool (是否被使用)                              │
-│    - userLen: size_t (用户标识长度)                      │
-│    - user: char[userLen] (用户标识字符串，如果 userLen>0) │
-│    - contentLen: size_t (内容标识长度)                   │
-│    - content: char[contentLen] (内容标识，如果 contentLen>0)│
+│    - memoryIdLen: size_t (Memory ID 长度)                │
+│    - memory_id: char[memoryIdLen] (Memory ID 字符串)     │
+│    - descLen: size_t (描述长度)                          │
+│    - description: char[descLen] (描述字符串)             │
 ├─────────────────────────────────────────────────────────┤
 │ 3. Used Map (使用状态位图)                                │
 │    - bitsetBytes: uint8_t[(256+7)/8] (32字节)            │
 │      (每个位表示对应块的使用状态)                          │
 ├─────────────────────────────────────────────────────────┤
-│ 4. User Block Info (用户块信息映射)                       │
-│    对每个用户条目:                                        │
-│    - keyLen: size_t (用户标识长度)                       │
-│    - key: char[keyLen] (用户标识字符串)                  │
+│ 4. Memory Info (内存块信息映射)                           │
+│    对每个内存条目:                                        │
+│    - keyLen: size_t (Memory ID 长度)                    │
+│    - key: char[keyLen] (Memory ID 字符串)               │
 │    - startBlock: size_t (起始块ID)                       │
 │    - blockCount: size_t (块数量)                         │
 ├─────────────────────────────────────────────────────────┤
-│ 5. Pool Data (内存池数据)                                 │
-│    - pool_: uint8_t[1048576] (1MB 原始数据)              │
+│ 5. Memory Last Modified Time (最后修改时间映射)          │
+│    对每个内存条目:                                        │
+│    - keyLen: size_t (Memory ID 长度)                    │
+│    - key: char[keyLen] (Memory ID 字符串)               │
+│    - timeValue: time_t (最后修改时间戳)                  │
+├─────────────────────────────────────────────────────────┤
+│ 6. Pool Data (内存池数据)                                 │
+│    - pool_: uint8_t[kPoolSize] (内存池原始数据)          │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -144,16 +154,18 @@ struct BlockMeta {
 - **文件类型**：二进制文件
 - **字节序**：小端序（Little-Endian，Windows 默认）
 - **魔数**：`0x4D454D50`（ASCII: "MEMP"），用于文件格式验证
-- **版本号**：当前为 `1`，用于未来格式升级兼容
+- **版本号**：当前为 `3`，用于未来格式升级兼容
+- **版本兼容**：支持加载版本1和版本2的旧文件（向后兼容）
 
 #### 文件大小估算
 
 - 文件头：`sizeof(FileHeader)` ≈ 48 字节
-- 元数据数组：256 × (1 + 8 + 可变字符串长度) ≈ 2-10 KB（取决于字符串长度）
+- 元数据数组：256 × (1 + 8 + 8 + 可变字符串长度) ≈ 4-15 KB（取决于字符串长度）
 - Used Map：32 字节
-- User Block Info：可变（取决于用户数量）
-- Pool Data：1,048,576 字节（1MB）
-- **总大小**：约 1.05-1.06 MB
+- Memory Info：可变（取决于内存块数量）
+- Memory Last Modified Time：可变（取决于内存块数量）
+- Pool Data：kPoolSize 字节（当前为 100MB）
+- **总大小**：约 100MB+（取决于元数据大小）
 
 ## 使用方法
 
@@ -183,18 +195,21 @@ server> help status
 server> status --memory
 server> status --block
 
-# 分配内存
-server> alloc client_1 "Hello World"
+# 分配内存（自动生成 Memory ID）
+server> alloc "User Data" "Hello World"
+Allocation successful. Memory ID: memory_00001
+Description: User Data
+Content stored at block 0
 
-# 读取用户内容
-server> read client_1
+# 读取内存内容
+server> read memory_00001
 
-# 释放用户内存
-server> free client_1
-server> delete client_1  # free 的别名
+# 释放内存
+server> free memory_00001
+server> delete memory_00001  # free 的别名
 
-# 更新用户内容
-server> update client_1 "Updated Content"
+# 更新内存内容
+server> update memory_00001 "Updated Content"
 
 # 批量执行命令文件
 server> exec sample.txt
@@ -219,28 +234,29 @@ server> quit
 **`status --memory` 输出：**
 ```
 Memory Pool Status:
-| range                 | Occupied Client     | Last Modified       |
-| --------------------- | ------------------- | ------------------- |
-| block_000 - block_015 | 192.168.1.100:54321 | 2024-01-15 10:30:45 |
-| block_016 - block_031 | client_2            | 2024-01-15 11:20:10 |
+|          range          |    MemoryID    |    Description    |    Last Modified    |
+|-------------------------|----------------|------------------|---------------------|
+| block_000 - block_015   | memory_00001   | User Data        | 2024-01-15 10:30:45 |
+| block_016 - block_031   | memory_00002   | Config Data      | 2024-01-15 11:20:10 |
 ```
 
 **`status --block` 输出：**
 ```
 Block Pool Status:
-| ID        | Occupied Client     | Last Modified       |
-| --------- | ------------------- | ------------------- |
-| block_000 | 192.168.1.100:54321 | 2024-01-15 10:30:45 |
-| block_001 | 192.168.1.100:54321 | 2024-01-15 10:30:45 |
-| block_002 | -                   | -                   |
+|     ID    |    MemoryID    |    Description    |    Last Modified    |
+|-----------|----------------|------------------|---------------------|
+| block_000 | memory_00001   | User Data        | 2024-01-15 10:30:45 |
+| block_001 | memory_00001   | User Data        | 2024-01-15 10:30:45 |
 ```
 
-**`read <user>` 输出：**
+**`read <memory_id>` 输出：**
 ```
-User: client_1
+Memory ID: memory_00001
+Description: User Data
 Blocks: 0-0
 Content: "Hello World"
 Size: 11 bytes
+Last Modified: 2024-01-15 10:30:45
 ```
 
 ## 项目结构
@@ -307,14 +323,14 @@ Shared-Memory-Manage-System/
 
 ### 长期目标
 - [ ] 支持多客户端并发访问
-- [ ] 内存池大小可配置（当前固定 1MB）
+- [ ] 内存池大小可配置（当前固定 100MB）
 - [ ] 性能优化（减少内存拷贝，优化紧凑算法）
 - [ ] 日志系统
 - [ ] 单元测试
 
 ## 性能指标
 
-- **内存池大小**：1MB（256 × 4KB 块）
+- **内存池大小**：100MB（25,600 × 4KB 块）
 - **分配算法**：首次适配（First Fit）+ 自动紧凑
 - **时间复杂度**：
   - 分配：O(n) 最坏情况，n 为块数
@@ -333,7 +349,18 @@ Shared-Memory-Manage-System/
 
 ## 更新日志
 
-### v0.3.2 (当前版本)
+### v0.4.0 (当前版本)
+- ✅ **重大架构变更**：取消用户身份系统，改为 Memory ID 系统
+- ✅ 使用 `memory_00001`, `memory_00002` 等唯一标识符区分内存块
+- ✅ 每个内存块都有描述信息（Description）
+- ✅ `alloc` 命令改为 `alloc "<description>" "<content>"`，自动生成 Memory ID
+- ✅ `read`/`free`/`update` 命令改为使用 Memory ID
+- ✅ `status` 命令显示 Memory ID 和 Description 而不是 Occupied Client
+- ✅ `status --block` 只显示已使用的块，不显示空块
+- ✅ 持久化功能升级到版本3，支持保存和加载 Memory ID 和描述信息
+- ✅ 支持版本兼容：可以加载版本1和版本2的旧文件（向后兼容）
+
+### v0.3.2
 - ✅ 添加用户最后修改时间追踪功能
 - ✅ `status --memory` 和 `status --block` 命令显示最后修改时间
 - ✅ 持久化功能升级到版本2，支持保存和加载时间信息
