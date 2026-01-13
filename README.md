@@ -1,5 +1,9 @@
 # Shared Memory Management System
 
+![python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue?logo=python&logoColor=white)
+![platform](https://img.shields.io/badge/platform-windows-lightgrey?logo=windows&logoColor=white)
+![license](https://img.shields.io/badge/license-MIT-green)
+
 ## 项目简介
 
 本项目是一个基于 C++17 实现的共享内存管理系统，采用固定块大小（4KB）的内存池管理策略，提供高效的内存分配、释放和紧凑功能。系统通过 TCP 服务器提供客户端接口，支持多客户端通过网络连接访问共享内存池。客户端可以使用任何支持 TCP Socket 的编程语言实现。
