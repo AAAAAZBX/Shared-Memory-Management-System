@@ -8,6 +8,9 @@
 #include <cstring>
 #include <fstream>
 #include <climits>
+#include <vector>
+#include <filesystem>
+#include <windows.h>
 
 static const std::vector<CommandSpec> kCmds = {
     // 帮助命令
@@ -24,9 +27,10 @@ static const std::vector<CommandSpec> kCmds = {
 
     // 分配命令
     {"alloc",
-     "Allocate memory with description and content",
-     "alloc \"<description>\" \"<content>\"",
-     {"alloc \"User Data\" \"Hello World\"", "alloc \"Config\" \"key=value\""}},
+     "Allocate memory with description and content (supports file upload for .txt files)",
+     "alloc \"<description>\" \"<content>\" or alloc \"<description>\" @<filepath>",
+     {"alloc \"User Data\" \"Hello World\"", "alloc \"Config\" \"key=value\"",
+      "alloc \"Document\" @file.txt", "alloc \"Document\" @C:\\Users\\file.txt"}},
 
     // 读取命令
     {"read",
@@ -127,6 +131,167 @@ static std::string ParseQuotedString(const std::vector<std::string>& tokens, siz
     return inQuotes ? result : ""; // 如果还在引号内，返回已解析的部分
 }
 
+// 读取文件内容（支持 .txt 文件）
+// filepath 可以是绝对路径（如 "C:\Users\file.txt"）或相对路径（如 "file.txt"）
+// 支持 UTF-8 编码的中文路径
+static bool ReadFileContent(const std::string& filepath, std::string& content) {
+    // 检查文件扩展名是否为 .txt
+    if (filepath.length() < 4 || filepath.substr(filepath.length() - 4) != ".txt") {
+        return false;
+    }
+
+    // 将 UTF-8 编码的路径转换为 UTF-16（Windows 文件系统使用 UTF-16）
+    int wideSize = MultiByteToWideChar(CP_UTF8, 0, filepath.c_str(), -1, nullptr, 0);
+    if (wideSize <= 0) {
+        return false;
+    }
+    std::vector<wchar_t> widePath(wideSize);
+    if (MultiByteToWideChar(CP_UTF8, 0, filepath.c_str(), -1, widePath.data(), wideSize) <= 0) {
+        return false;
+    }
+
+    // 使用宽字符路径打开文件
+    std::filesystem::path path(widePath.data());
+    std::ifstream file(path, std::ios::binary);
+    if (!file.is_open()) {
+        return false;
+    }
+
+    // 获取文件大小
+    file.seekg(0, std::ios::end);
+    size_t fileSize = file.tellg();
+    file.seekg(0, std::ios::beg);
+
+    // 检查文件大小是否超过内存池限制（预留一些空间）
+    constexpr size_t kMaxFileSize = SharedMemoryPool::kPoolSize - (1024 * 1024); // 预留1MB
+    if (fileSize > kMaxFileSize) {
+        file.close();
+        return false;
+    }
+
+    // 读取文件内容
+    content.resize(fileSize);
+    if (fileSize > 0) {
+        file.read(&content[0], static_cast<std::streamsize>(fileSize));
+
+        // 检查并移除 UTF-8 BOM（如果存在）
+        // UTF-8 BOM: EF BB BF (3 bytes)
+        if (fileSize >= 3 && static_cast<unsigned char>(content[0]) == 0xEF &&
+            static_cast<unsigned char>(content[1]) == 0xBB &&
+            static_cast<unsigned char>(content[2]) == 0xBF) {
+            // 移除 BOM
+            content = content.substr(3);
+        }
+    }
+    file.close();
+
+    return true;
+}
+
+// 检查字符串是否是文件路径（以 @ 开头或 .txt 结尾）
+static bool IsFilePath(const std::string& str) {
+    // 检查是否以 @ 开头（如 @file.txt）
+    if (str.length() > 0 && str[0] == '@') {
+        return true;
+    }
+    // 检查是否以 .txt 结尾
+    if (str.length() >= 4 && str.substr(str.length() - 4) == ".txt") {
+        return true;
+    }
+    return false;
+}
+
+// 从文件路径字符串中提取实际路径（去掉 @ 前缀）
+// 支持绝对路径（如 @"C:\Users\file.txt" 或 @C:\Users\file.txt）和相对路径（如 @file.txt）
+static std::string ExtractFilePath(const std::string& str) {
+    if (str.length() > 0 && str[0] == '@') {
+        std::string path = str.substr(1);
+        // 如果路径在引号内（ParseQuotedString 可能已经处理了，但为了安全还是检查一下）
+        if (path.length() >= 2 && path.front() == '"' && path.back() == '"') {
+            return path.substr(1, path.length() - 2);
+        }
+        return path;
+    }
+    return str;
+}
+
+// 计算字符串的显示宽度（中文字符算2个宽度，ASCII字符算1个宽度）
+static size_t GetDisplayWidth(const std::string& str) {
+    size_t width = 0;
+    for (size_t i = 0; i < str.length();) {
+        unsigned char c = static_cast<unsigned char>(str[i]);
+        if (c < 0x80) {
+            // ASCII 字符，宽度为1
+            width += 1;
+            i += 1;
+        } else if ((c & 0xE0) == 0xC0) {
+            // UTF-8 2字节字符（通常是中文等）
+            width += 2;
+            i += 2;
+        } else if ((c & 0xF0) == 0xE0) {
+            // UTF-8 3字节字符（通常是中文等）
+            width += 2;
+            i += 3;
+        } else if ((c & 0xF8) == 0xF0) {
+            // UTF-8 4字节字符
+            width += 2;
+            i += 4;
+        } else {
+            // 无效字符，跳过
+            i += 1;
+        }
+    }
+    return width;
+}
+
+// 将字符串填充到指定显示宽度（右侧填充空格）
+static std::string PadToDisplayWidth(const std::string& str, size_t targetWidth) {
+    size_t currentWidth = GetDisplayWidth(str);
+    if (currentWidth >= targetWidth) {
+        return str;
+    }
+    return str + std::string(targetWidth - currentWidth, ' ');
+}
+
+// 将字符串截断到指定显示宽度（如果超出则添加...）
+static std::string TruncateToDisplayWidth(const std::string& str, size_t targetWidth) {
+    if (GetDisplayWidth(str) <= targetWidth) {
+        return str;
+    }
+
+    // 需要截断，找到合适的截断位置
+    size_t currentWidth = 0;
+    size_t i = 0;
+    while (i < str.length() && currentWidth + 3 <= targetWidth) { // 3是"..."的宽度
+        unsigned char c = static_cast<unsigned char>(str[i]);
+        size_t charWidth = 1;
+        size_t charLen = 1;
+
+        if (c < 0x80) {
+            charWidth = 1;
+            charLen = 1;
+        } else if ((c & 0xE0) == 0xC0) {
+            charWidth = 2;
+            charLen = 2;
+        } else if ((c & 0xF0) == 0xE0) {
+            charWidth = 2;
+            charLen = 3;
+        } else if ((c & 0xF8) == 0xF0) {
+            charWidth = 2;
+            charLen = 4;
+        }
+
+        if (currentWidth + charWidth + 3 > targetWidth) {
+            break;
+        }
+
+        currentWidth += charWidth;
+        i += charLen;
+    }
+
+    return str.substr(0, i) + "...";
+}
+
 // 打印帮助概览
 void PrintHelpOverview() {
     std::cout << "Commands:\n";
@@ -178,11 +343,12 @@ void HandleCommand(const std::vector<std::string>& tokens, SharedMemoryPool& smp
         if (mode == "--memory") {
             // 原来的 status 命令内容
             std::cout << "Memory Pool Status:\n";
-            std::cout << "|    MemoryID    |    Description    |          range          |    Last "
+            std::cout << "|    MemoryID    |    Description    |      Bytes      |          range  "
+                         "        |    Last "
                          "Modified    |\n";
-            std::cout
-                << "|----------------|-------------------|-------------------------|----------"
-                   "-----------|\n";
+            std::cout << "|----------------|-------------------|-----------------|-----------------"
+                         "--------|----------"
+                         "-----------|\n";
 
             // 使用指针避免复制数据，按起始 block 排序
             const auto& memoryInfo = smp.GetMemoryInfo();
@@ -206,15 +372,27 @@ void HandleCommand(const std::vector<std::string>& tokens, SharedMemoryPool& smp
                 std::string rangeStr = rangeStream.str();
                 const auto& meta = smp.GetMeta(entry->second.first);
                 std::string description = meta.description.empty() ? "-" : meta.description;
-                // 截断过长的描述
-                if (description.length() > 17) {
-                    description = description.substr(0, 14) + "...";
-                }
-                std::string lastModified = smp.GetMemoryLastModifiedTimeString(entry->first);
-                std::cout << "| " << std::left << std::setw(14) << std::setfill(' ') << entry->first
-                          << " | " << std::left << std::setw(17) << description << " | "
-                          << std::left << std::setw(23) << rangeStr << " | " << std::left
-                          << std::setw(19) << lastModified << " |\n";
+
+                // 计算实际字节数（通过读取内容）
+                std::string content = smp.GetMemoryContentAsString(entry->first);
+                size_t bytes = content.size();
+
+                // 格式化字节数（添加千位分隔符）
+                std::ostringstream bytesStream;
+                bytesStream << bytes;
+                std::string bytesStr = bytesStream.str();
+
+                // 使用显示宽度进行截断和填充（支持中文）
+                std::string memoryId = PadToDisplayWidth(entry->first, 14);
+                description = TruncateToDisplayWidth(description, 17);
+                description = PadToDisplayWidth(description, 17);
+                std::string bytesFormatted = PadToDisplayWidth(bytesStr, 15);
+                std::string range = PadToDisplayWidth(rangeStr, 23);
+                std::string lastModified =
+                    PadToDisplayWidth(smp.GetMemoryLastModifiedTimeString(entry->first), 19);
+
+                std::cout << "| " << memoryId << " | " << description << " | " << bytesFormatted
+                          << " | " << range << " | " << lastModified << " |\n";
             }
         } else if (mode == "--block") {
             // 原来的 blocks 命令内容
@@ -236,18 +414,20 @@ void HandleCommand(const std::vector<std::string>& tokens, SharedMemoryPool& smp
                 std::ostringstream oss;
                 oss << "block_" << std::setfill('0') << std::setw(3) << i << std::setfill(' ');
 
+                std::string blockIdStr = oss.str();
                 std::string memoryId = meta.memory_id;
                 std::string description = meta.description.empty() ? "-" : meta.description;
-                // 截断过长的描述
-                if (description.length() > 17) {
-                    description = description.substr(0, 14) + "...";
-                }
-                std::string lastModified = smp.GetMemoryLastModifiedTimeString(meta.memory_id);
 
-                std::cout << "| " << std::setw(9) << oss.str() << " | " << std::left
-                          << std::setw(14) << memoryId << " | " << std::left << std::setw(17)
-                          << description << " | " << std::left << std::setw(19) << lastModified
-                          << " |\n";
+                // 使用显示宽度进行截断和填充（支持中文）
+                std::string blockId = PadToDisplayWidth(blockIdStr, 9);
+                memoryId = PadToDisplayWidth(memoryId, 14);
+                description = TruncateToDisplayWidth(description, 17);
+                description = PadToDisplayWidth(description, 17);
+                std::string lastModified =
+                    PadToDisplayWidth(smp.GetMemoryLastModifiedTimeString(meta.memory_id), 19);
+
+                std::cout << "| " << blockId << " | " << memoryId << " | " << description << " | "
+                          << lastModified << " |\n";
             }
 
             if (!hasUsedBlocks) {
@@ -428,31 +608,134 @@ void HandleCommand(const std::vector<std::string>& tokens, SharedMemoryPool& smp
     // alloc 命令
     else if (cmd == "alloc") {
         if (tokens.size() < 3) {
-            std::cout << "Usage: alloc \"<description>\" \"<content>\"\n";
+            std::cout << "Usage: alloc \"<description>\" \"<content>\" or alloc \"<description>\" "
+                         "@<filepath>\n";
+            std::cout << "Example: alloc \"User Data\" \"Hello World\"\n";
+            std::cout << "Example: alloc \"Document\" @file.txt (relative path)\n";
+            std::cout << "Example: alloc \"Document\" @C:\\Users\\file.txt (absolute path)\n";
+            return;
+        }
+
+        // 解析 description（带引号的字符串）
+        std::string description = ParseQuotedString(tokens, 1);
+
+        if (description.empty()) {
+            std::cout << "Error: Description must be provided and enclosed in double quotes.\n";
             std::cout << "Example: alloc \"User Data\" \"Hello World\"\n";
             return;
         }
 
-        // 解析 description 和 content（都是带引号的字符串）
-        std::string description = ParseQuotedString(tokens, 1);
-        std::string content = ParseQuotedString(tokens, 2);
+        // 解析 content：可能是带引号的字符串，也可能是以 @ 开头的文件路径
+        // 需要找到第一个以 @ 开头的 token（可能在 tokens[2] 或更后面）
+        std::string content;
 
-        if (description.empty() || content.empty()) {
-            std::cout << "Error: Both description and content must be provided and enclosed in "
-                         "double quotes.\n";
-            std::cout << "Example: alloc \"User Data\" \"Hello World\"\n";
-            return;
+        // 找到第一个以 @ 开头的 token 的索引
+        size_t contentStartIdx = tokens.size();
+        for (size_t i = 2; i < tokens.size(); ++i) {
+            if (tokens[i].length() > 0 && tokens[i][0] == '@') {
+                contentStartIdx = i;
+                break;
+            }
+        }
+
+        if (contentStartIdx < tokens.size()) {
+            std::string firstToken = tokens[contentStartIdx];
+
+            // 检查是否是带引号的文件路径 @"path"
+            if (firstToken.length() >= 2 && firstToken[0] == '@' && firstToken[1] == '"') {
+                // 带引号的文件路径：@"path"
+                // 手动解析，去掉 @" 前缀和结尾的 "
+                if (firstToken.back() == '"' && firstToken.length() > 3) {
+                    // 单个 token：@"path"
+                    content = "@" + firstToken.substr(2, firstToken.length() - 3);
+                } else {
+                    // 跨多个 tokens，需要拼接
+                    std::string pathContent = firstToken.substr(2); // 去掉 @"
+                    for (size_t i = contentStartIdx + 1; i < tokens.size(); ++i) {
+                        const std::string& token = tokens[i];
+                        if (token.back() == '"') {
+                            // 找到结束引号
+                            pathContent += " " + token.substr(0, token.length() - 1);
+                            break;
+                        } else {
+                            pathContent += " " + token;
+                        }
+                    }
+                    content = "@" + pathContent;
+                }
+            } else if (firstToken.length() > 0 && firstToken[0] == '@') {
+                // 不带引号的文件路径：@path
+                content = firstToken;
+            }
+        } else {
+            // 没有找到 @ 开头的 token，尝试作为普通文本内容解析（带引号）
+            // 找到 description 结束后的第一个 token
+            size_t contentIdx = 2;
+            // 如果 description 跨多个 tokens，需要找到它的结束位置
+            bool inDescQuotes = false;
+            for (size_t i = 1; i < tokens.size(); ++i) {
+                const std::string& token = tokens[i];
+                if (!inDescQuotes && token.front() == '"') {
+                    inDescQuotes = true;
+                }
+                if (inDescQuotes && token.back() == '"') {
+                    contentIdx = i + 1;
+                    break;
+                }
+            }
+            if (contentIdx < tokens.size()) {
+                content = ParseQuotedString(tokens, contentIdx);
+            }
+        }
+
+        // 检查 content 是否是文件路径
+        std::string actualContent;
+        bool isFileUpload = false;
+
+        if (IsFilePath(content)) {
+            // 提取文件路径（去掉 @ 前缀）
+            std::string filepath = ExtractFilePath(content);
+
+            // 读取文件内容（支持绝对路径和相对路径）
+            if (ReadFileContent(filepath, actualContent)) {
+                isFileUpload = true;
+                std::cout << "Reading file: " << filepath << " (" << actualContent.size()
+                          << " bytes)\n";
+            } else {
+                std::cout << "Error: Failed to read file '" << filepath << "'.\n";
+                std::cout << "Please check:\n";
+                std::cout << "  1. File exists (supports both absolute and relative paths)\n";
+                std::cout << "  2. File extension is .txt\n";
+                std::cout << "  3. File size is within memory pool limit\n";
+                std::cout << "Examples:\n";
+                std::cout << "  Relative path: alloc \"Doc\" @file.txt\n";
+                std::cout << "  Absolute path: alloc \"Doc\" @C:\\Users\\Documents\\file.txt\n";
+                return;
+            }
+        } else {
+            // 普通文本内容
+            if (content.empty()) {
+                std::cout << "Error: Content must be provided and enclosed in double quotes.\n";
+                std::cout << "Example: alloc \"User Data\" \"Hello World\"\n";
+                std::cout << "Or use file upload: alloc \"Document\" @file.txt\n";
+                return;
+            }
+            actualContent = content;
         }
 
         // 自动生成 memory_id
         std::string memory_id = smp.GenerateNextMemoryId();
 
         // 将 content 作为数据写入内存池
-        int blockId = smp.AllocateBlock(memory_id, description, content.data(), content.size());
+        int blockId =
+            smp.AllocateBlock(memory_id, description, actualContent.data(), actualContent.size());
 
         if (blockId >= 0) {
             std::cout << "Allocation successful. Memory ID: " << memory_id << "\n";
             std::cout << "Description: " << description << "\n";
+            if (isFileUpload) {
+                std::cout << "File uploaded successfully (" << actualContent.size() << " bytes)\n";
+            }
             std::cout << "Content stored at block " << blockId << "\n";
         } else {
             std::cout << "Allocation failed. Insufficient memory or invalid parameters.\n";
@@ -479,6 +762,8 @@ void HandleCommand(const std::vector<std::string>& tokens, SharedMemoryPool& smp
         // 获取内存的块信息和描述
         const auto& memoryInfo = smp.GetMemoryInfo();
         auto it = memoryInfo.find(memory_id);
+
+        // 显示元信息
         if (it != memoryInfo.end()) {
             size_t startBlock = it->second.first;
             size_t blockCount = it->second.second;
@@ -486,13 +771,27 @@ void HandleCommand(const std::vector<std::string>& tokens, SharedMemoryPool& smp
             std::cout << "Memory ID: " << memory_id << "\n";
             std::cout << "Description: " << meta.description << "\n";
             std::cout << "Blocks: " << startBlock << "-" << (startBlock + blockCount - 1) << "\n";
-            std::cout << "Content: \"" << content << "\"\n";
-            std::cout << "Size: " << content.size() << " bytes\n";
+        }
+
+        // 上划线（虚线）
+        std::cout << "----------------------------------------\n";
+
+        // 直接输出内容（不添加引号）
+        std::cout << content;
+
+        // 如果内容不以换行符结尾，添加换行
+        if (!content.empty() && content.back() != '\n') {
+            std::cout << "\n";
+        }
+
+        // 下划线（虚线）
+        std::cout << "----------------------------------------\n";
+
+        // 显示大小和修改时间
+        std::cout << "Size: " << content.size() << " bytes\n";
+        if (it != memoryInfo.end()) {
             std::cout << "Last Modified: " << smp.GetMemoryLastModifiedTimeString(memory_id)
                       << "\n";
-        } else {
-            std::cout << "Content: \"" << content << "\"\n";
-            std::cout << "Size: " << content.size() << " bytes\n";
         }
         return;
     }

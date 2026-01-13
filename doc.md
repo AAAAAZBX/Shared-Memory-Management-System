@@ -55,6 +55,8 @@
       - [添加新命令](#添加新命令)
       - [修改内存池大小（计划扩展至 1GB）](#修改内存池大小计划扩展至-1gb)
       - [添加持久化字段](#添加持久化字段)
+      - [文件上传功能实现](#文件上传功能实现)
+      - [UTF-8 中文支持](#utf-8-中文支持)
   - [附录](#附录)
     - [性能指标](#性能指标)
     - [常见问题](#常见问题)
@@ -84,8 +86,10 @@
 
 #### 项目状态
 
-- ✅ **已完成**：内存池核心、命令处理、数据持久化、TCP 服务器、客户端接口规范
-- ⏳ **计划中**：内存池扩展（1GB）、紧凑算法优化、SDK/DLL 打包、文件上传功能
+- ✅ **已完成**：内存池核心、命令处理、数据持久化、文件上传功能、UTF-8 中文支持、表格显示优化
+- 🔄 **进行中**：TCP 服务器（60%）、客户端接口规范（60%）
+- ⏳ **计划中**：内存池扩展（1GB）、紧凑算法优化、SDK/DLL 打包
+- ⚠️ **已知问题**：TCP 连接功能存在一些问题，正在修复中
 
 ### 0.2 目录结构
 
@@ -110,9 +114,9 @@ Shared-Memory-Manage-System/
 │   │   └── README_TCP.md          # TCP 客户端接口设计说明
 │   ├── run.bat                     # 编译运行脚本
 │   └── build.bat                   # 编译脚本
-├── client/                         # 客户端程序
-│   ├── client.py                   # Python 客户端实现
-│   └── README.md                   # 客户端使用文档
+├── client/                         # 客户端实现
+│   ├── client.py                   # 客户端参考实现
+│   └── README.md                   # 客户端实现指南（适用于所有语言）
 ├── README.md                       # 项目说明文档（面向用户）
 ├── doc.md                          # 技术文档（面向开发者）
 └── details.md                      # 项目需求文档
@@ -127,7 +131,7 @@ Shared-Memory-Manage-System/
 - **`command/`**：命令处理，解析用户命令，调用内存池接口
 - **`persistence/`**：持久化，保存/加载内存池状态到文件
 - **`network/`**：网络模块，TCP 服务器实现，支持多客户端并发连接
-- **`client/`**：客户端实现指南和参考实现（Python）
+- **`client/`**：客户端实现指南和参考实现
 
 
 ---
@@ -245,6 +249,9 @@ static constexpr size_t kBlockCount = kPoolSize / kBlockSize;  // 25,600 块
 
 **工具方法**
 - `void Compact()`：紧凑内存，合并碎片，将所有已使用的块移动到前端
+  - 修复了多块内存的起始位置更新问题
+  - 使用 `newStartPositions` 映射确保每个 memory_id 只更新一次起始位置
+  - 确保 compact 后所有已使用的块连续排列，不留空隙
 
 #### 实现要点
 
@@ -267,15 +274,28 @@ struct CommandSpec {
 #### 支持的命令
 
 - **help [command]**：显示帮助信息
-- **status [--memory|--block]**：显示内存池状态，包含 Memory ID、描述和最后修改时间
+- **status [--memory|--block]**：显示内存池状态
+  - `status --memory`：显示 Memory ID、Description、Bytes（实际数据大小）、Range、Last Modified
+  - `status --block`：显示已使用的块信息
+  - 支持中文显示，表格列自动对齐（中文字符按 2 个显示宽度计算）
 - **info**：显示系统综合信息
 - **alloc "<description>" "<content>"**：分配内存，自动生成 Memory ID
+- **alloc "<description>" @<filepath>**：从文件上传内容到内存池（支持 .txt 文件）
+  - 支持相对路径和绝对路径
+  - 支持带引号的路径：`@"path/to/file.txt"` 或 `@"C:\Users\file.txt"`
+  - 自动检测和移除 UTF-8 BOM
 - **read <memory_id>**：读取指定 Memory ID 的内容
+  - 使用虚线分隔元信息和内容
+  - 内容原样输出，不添加引号
+  - 支持多行内容和中文显示
 - **free <memory_id>**：释放指定 Memory ID 的内存
 - **delete <memory_id>**：释放指定 Memory ID 的内存（`free` 的别名）
 - **update <memory_id> "<new_content>"**：更新指定 Memory ID 的内容
 - **exec <filename>**：从文件批量执行命令
 - **compact**：紧凑内存
+  - 将所有已使用的块移动到内存池前端
+  - 修复了多块内存的起始位置更新问题
+  - 确保 compact 后所有已使用的块连续排列
 - **reset**：重置内存池（需要密码确认）
 - **quit/exit**：退出程序
 
@@ -383,13 +403,13 @@ struct FileHeader {
 **内容**：
 - ✅ 完整的协议规范说明
 - ✅ 适用于所有编程语言的实现指南
-- ✅ C/C++、Python、Java、Go 等语言的实现示例
+- ✅ 多语言实现示例（C/C++、Python、Java、Go 等）
 - ✅ 操作示例和错误处理说明
 - ✅ 测试建议和故障排除指南
 
-**Python 参考实现**：`client/client.py`
+**参考实现**：`client/client.py`
 
-项目提供了完整的 Python 实现作为参考，包含：
+项目提供了客户端参考实现，包含：
 - 完整的协议封装
 - 所有操作的 API
 - 错误处理
@@ -470,13 +490,19 @@ int FindContinuousFreeBlock(blockCount) {
 
 **流程**：
 1. 找到第一个空闲块位置 `freePos`
-2. 从 `freePos` 开始向后遍历
+2. 从前往后遍历所有块
 3. 如果遇到已使用的块，将其移动到 `freePos`
-4. 更新元数据、位图和用户映射表
-5. `freePos++`，继续处理
+4. 更新元数据、位图和内存映射表
+5. 使用 `newStartPositions` 映射确保每个 memory_id 只更新一次起始位置
+6. `freePos++`，继续处理
+
+**关键优化**：
+- 使用 `std::map<std::string, size_t> newStartPositions` 记录每个 memory_id 的新起始位置
+- 对于占用多个块的内存，只在第一个块时更新起始位置
+- 确保 compact 后所有已使用的块连续排列，不留空隙
 
 **时间复杂度**：O(n)  
-**空间复杂度**：O(1)，原地操作
+**空间复杂度**：O(m)，m 为不同 memory_id 的数量（通常很小）
 
 #### 位图优化
 
@@ -530,6 +556,74 @@ static constexpr size_t kPoolSize = 1024 * 1024 * 1024;  // 1GB
 3. 在 `Save()` 和 `Load()` 中处理新字段
 4. 处理版本兼容性
 
+#### 文件上传功能实现
+
+**功能概述**：`alloc` 命令支持从文件读取内容并上传到内存池。
+
+**实现位置**：`server/command/commands.cpp`
+
+**核心函数**：
+- `ReadFileContent(const std::string& filepath, std::string& content)`：读取文件内容
+  - 检查文件扩展名是否为 `.txt`
+  - 以二进制模式打开文件
+  - 检测并移除 UTF-8 BOM（如果存在）
+  - 读取文件内容到字符串
+- `IsFilePath(const std::string& str)`：检测字符串是否为文件路径
+  - 检查是否以 `@` 开头
+  - 检查是否以 `.txt` 结尾
+- `ExtractFilePath(const std::string& str)`：提取文件路径
+  - 去掉 `@` 前缀
+  - 处理带引号的路径
+
+**使用方法**：
+```bash
+# 相对路径
+alloc "文档" @file.txt
+alloc "文档" @"../sample/test_file.txt"
+
+# 绝对路径
+alloc "文档" @C:\Users\file.txt
+alloc "文档" @"C:\Users\My Documents\file.txt"
+```
+
+**注意事项**：
+- 仅支持 `.txt` 文件格式
+- 文件大小不能超过内存池限制（预留 1MB）
+- 支持 UTF-8 编码，自动处理 BOM
+- 路径可以包含空格，需要使用引号包裹
+
+#### UTF-8 中文支持
+
+**功能概述**：完整支持 UTF-8 编码的中文显示和文件读取。
+
+**实现位置**：
+- `server/main.cpp`：设置控制台代码页为 UTF-8
+- `server/command/commands.cpp`：表格显示宽度计算和文件读取
+
+**核心实现**：
+
+1. **控制台 UTF-8 支持**（`main.cpp`）：
+```cpp
+SetConsoleOutputCP(65001); // UTF-8 code page
+SetConsoleCP(65001);        // UTF-8 code page
+```
+
+2. **显示宽度计算**（`commands.cpp`）：
+- `GetDisplayWidth(const std::string& str)`：计算字符串显示宽度
+  - ASCII 字符：宽度为 1
+  - UTF-8 中文字符（2-4 字节）：宽度为 2
+- `PadToDisplayWidth(const std::string& str, size_t targetWidth)`：填充到指定显示宽度
+- `TruncateToDisplayWidth(const std::string& str, size_t targetWidth)`：截断到指定显示宽度
+
+3. **文件读取 UTF-8 支持**：
+- 自动检测和移除 UTF-8 BOM（EF BB BF）
+- 支持 UTF-8 编码的中文内容读取
+
+**应用场景**：
+- 表格列对齐（`status` 命令）
+- 文件内容显示（`read` 命令）
+- 文件上传（`alloc` 命令）
+
 ---
 
 ## 附录
@@ -570,4 +664,5 @@ A: 需要为 `SharedMemoryPool` 的操作添加互斥锁（`std::mutex`），确
 1. **内存池扩展**：将内存池从 100MB 扩展到 1GB，优化大内存池性能
 2. **紧凑算法优化**：改进内存紧凑算法，减少拷贝次数，提高效率
 3. **SDK/DLL 打包**：将核心功能打包为 DLL，提供 C/C++ SDK 接口
-4. **文件上传功能**：支持客户端上传文件到内存池，实现分块上传和大文件处理
+4. **TCP 连接修复**：修复 TCP 连接功能存在的问题
+5. **客户端文件上传**：支持客户端通过 TCP 上传文件到内存池（服务器端文件上传功能已完成）

@@ -93,7 +93,7 @@ class MemoryClient:
             Tuple[ResponseCode, bytes]: (状态码, 响应数据)
         """
         if not self.sock:
-            raise RuntimeError("Not connected to server")
+            raise RuntimeError("Not connected to server. Call connect() first.")
         
         # 构建请求包：[命令类型: 1字节] [数据长度: 4字节(大端序)] [数据内容: N字节]
         cmd_byte = cmd.value.to_bytes(1, 'big')
@@ -270,7 +270,7 @@ def main():
     # 使用上下文管理器（推荐）
     # 注意：如果服务器未运行，会抛出异常
     try:
-        with MemoryClient("172.29.57.127", 8888) as client:
+        with MemoryClient("192.168.20.39", 8888) as client:
             # 心跳检测
             print("=" * 50)
             print("Testing PING...")

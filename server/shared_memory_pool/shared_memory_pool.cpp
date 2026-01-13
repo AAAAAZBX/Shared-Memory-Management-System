@@ -141,9 +141,14 @@ size_t SharedMemoryPool::GetMaxContinuousFreeBlocks() const {
 void SharedMemoryPool::Compact() {
     // 找到第一个空闲块的位置
     size_t freePos = 0;
+    // 记录每个 memory_id 的新起始位置（避免重复更新）
+    std::map<std::string, size_t> newStartPositions;
+
     // 从前往后遍历，将已使用的块移动到前面
     for (size_t i = 0; i < kBlockCount; ++i) {
         if (used_map[i]) {
+            const std::string& memory_id = meta_[i].memory_id;
+
             // 如果当前块已使用，且不在正确位置，需要移动
             if (i != freePos) {
                 // 移动数据
@@ -156,14 +161,20 @@ void SharedMemoryPool::Compact() {
                 // 更新 used_map
                 used_map.set(freePos, true);
                 used_map.set(i, false);
-                // 更新内存信息中的起始块位置
-                if (!meta_[freePos].memory_id.empty()) {
-                    auto it = memory_info.find(meta_[freePos].memory_id);
+            }
+
+            // 更新内存信息中的起始块位置（只更新一次，对于每个 memory_id 的第一个块）
+            if (!memory_id.empty()) {
+                if (newStartPositions.find(memory_id) == newStartPositions.end()) {
+                    // 这是该 memory_id 的第一个块，记录新起始位置
+                    newStartPositions[memory_id] = freePos;
+                    auto it = memory_info.find(memory_id);
                     if (it != memory_info.end()) {
                         it->second.first = freePos;
                     }
                 }
             }
+
             freePos++;
         }
     }

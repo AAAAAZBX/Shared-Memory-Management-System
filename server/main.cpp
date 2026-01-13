@@ -17,6 +17,7 @@
 #endif
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <windows.h>
 // Note: ws2_32.lib must be linked via -lws2_32 compiler flag
 // #pragma comment doesn't work with MinGW
 
@@ -220,6 +221,10 @@ static void PrintServerConnectionInfo(uint16_t port) {
 }
 
 int main() {
+    // 设置控制台代码页为 UTF-8，以支持中文显示
+    SetConsoleOutputCP(65001); // UTF-8 code page
+    SetConsoleCP(65001);       // UTF-8 code page
+
     // 确保输出立即显示
     std::ios_base::sync_with_stdio(false);
     std::cin.tie(nullptr);
