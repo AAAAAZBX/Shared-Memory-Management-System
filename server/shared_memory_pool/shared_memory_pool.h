@@ -1,5 +1,4 @@
 #pragma once
-#include <array>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -10,13 +9,13 @@
 
 class SharedMemoryPool {
   public:
-    static constexpr size_t kPoolSize = 1024 * 1024 * 100;        // 2GB
+    static constexpr size_t kPoolSize = 1024 * 1024 * 1024;       // 1GB
     static constexpr size_t kBlockSize = 4096;                    // 4KB
     static constexpr size_t kBlockCount = kPoolSize / kBlockSize; // 512K块
 
     struct BlockMeta {
-        bool used = false;           // 是否被使用
-        std::string memory_id = "";  // 内存ID (memory_00001, memory_00002, ...)
+        bool used = false;            // 是否被使用
+        std::string memory_id = "";   // 内存ID (memory_00001, memory_00002, ...)
         std::string description = ""; // 内容描述
     };
 
@@ -27,7 +26,8 @@ class SharedMemoryPool {
     const BlockMeta& GetMeta(size_t blockId) const;
     bool SetMeta(size_t blockId, const std::string& memory_id, const std::string& description);
     // 用于加载时直接设置元数据（不检查 used_map，不修改 free_block_count）
-    void SetMetaForLoad(size_t blockId, const std::string& memory_id, const std::string& description);
+    void SetMetaForLoad(size_t blockId, const std::string& memory_id,
+                        const std::string& description);
     const std::map<std::string, std::pair<size_t, size_t>>& GetMemoryInfo() const;
     // 获取内存最后修改时间
     time_t GetMemoryLastModifiedTime(const std::string& memory_id) const;
@@ -39,16 +39,17 @@ class SharedMemoryPool {
     int FindContinuousFreeBlock(size_t blockCount); // 查找连续的空闲块
     size_t GetMaxContinuousFreeBlocks() const;      // 获取最大连续空闲块数
     void Compact();                                 // 紧凑内存
-    int AllocateBlock(const std::string& memory_id, const std::string& description, 
+    int AllocateBlock(const std::string& memory_id, const std::string& description,
                       const void* data, size_t dataSize); // 分配内存
 
     // 内存释放相关
     bool FreeByMemoryId(const std::string& memory_id); // 释放指定内存ID的所有内存
-    bool FreeByBlockId(size_t blockId);               // 释放内存
-    void ClearBlockMeta(size_t blockId);              // 清理块的元数据（不更新 free_block_count）
+    bool FreeByBlockId(size_t blockId);                // 释放内存
+    void ClearBlockMeta(size_t blockId);               // 清理块的元数据（不更新 free_block_count）
 
     // 内存内容查询（直接从内存池读取）
-    std::string GetMemoryContentAsString(const std::string& memory_id) const; // 获取内存内容字符串（遇到0停止）
+    std::string
+    GetMemoryContentAsString(const std::string& memory_id) const; // 获取内存内容字符串（遇到0停止）
 
     // 持久化相关
     bool SaveToFile(const std::string& filename) const;                // 保存到文件
@@ -91,12 +92,12 @@ class SharedMemoryPool {
     }
 
   private:
-    // 1MB内存池
-    std::vector<uint8_t> pool_;                 // 1MB
-    std::array<BlockMeta, kBlockCount> meta_{}; // 256个块的元信息
+    // 内存池
+    std::vector<uint8_t> pool_;   // 内存池数据
+    std::vector<BlockMeta> meta_; // 块的元信息（动态分配，支持大内存池）
     // 记录空闲数据块信息
     size_t free_block_count = kBlockCount; // 空闲块数量
-    std::bitset<kBlockCount> used_map;     // 记录256个块是否被使用
+    std::bitset<kBlockCount> used_map;     // 记录块是否被使用
     // 记录内存使用情况
     std::map<std::string, std::pair<size_t, size_t>> memory_info; // 内存ID -> (起始块位置, 块数量)
     // 记录内存最后修改时间

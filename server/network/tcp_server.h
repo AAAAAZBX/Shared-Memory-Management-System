@@ -21,7 +21,7 @@
 #ifdef ERROR_NOT_FOUND
 #undef ERROR_NOT_FOUND
 #endif
-#pragma comment(lib, "ws2_32.lib")
+// Note: ws2_32.lib is linked via -lws2_32 in build scripts (MinGW doesn't support #pragma comment)
 
 class TCPServer {
   public:

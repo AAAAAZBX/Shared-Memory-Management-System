@@ -9,9 +9,14 @@
 // 初始化
 bool SharedMemoryPool::Init() {
     try {
+        // 分配内存池数据
         pool_.assign(kPoolSize, 0);
+        // 动态分配元信息数组（避免栈溢出）
+        meta_.resize(kBlockCount);
         Reset();
         return true;
+    } catch (const std::bad_alloc& e) {
+        return false; // 内存分配失败
     } catch (...) {
         return false;
     }
