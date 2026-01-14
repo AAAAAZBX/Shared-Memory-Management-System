@@ -1,6 +1,6 @@
 #include "commands.h"
-#include "../shared_memory_pool/shared_memory_pool.h"
-#include "../persistence/persistence.h"
+#include "../../core/shared_memory_pool/shared_memory_pool.h"
+#include "../../core/persistence/persistence.h"
 #include <iostream>
 #include <iomanip>
 #include <algorithm>

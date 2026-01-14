@@ -19,7 +19,7 @@ for %%d in ("%GPP%") do set "GPPDIR=%%~dpd"
 set "PATH=%GPPDIR%;%PATH%"
 
 echo Compiling with: "%GPP%"
-"%GPP%" -std=c++17 -Wall main.cpp command/commands.cpp shared_memory_pool/shared_memory_pool.cpp persistence/persistence.cpp network/protocol.cpp network/tcp_server.cpp -o main.exe -lws2_32
+"%GPP%" -std=c++17 -Wall main.cpp command/commands.cpp ../core/shared_memory_pool/shared_memory_pool.cpp ../core/persistence/persistence.cpp network/protocol.cpp network/tcp_server.cpp -o main.exe -lws2_32
 
 if errorlevel 1 (
   echo Compilation failed!

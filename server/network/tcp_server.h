@@ -1,5 +1,5 @@
 #pragma once
-#include "../shared_memory_pool/shared_memory_pool.h"
+#include "../../core/shared_memory_pool/shared_memory_pool.h"
 #include "protocol.h"
 #include <string>
 #include <thread>
