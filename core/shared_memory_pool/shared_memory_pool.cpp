@@ -86,9 +86,6 @@ void SharedMemoryPool::UpdateMemoryBlockCount(const std::string& memory_id, size
 }
 
 // Base62 编码：将数字转换为 Base62 字符串（0-9, a-z, A-Z）
-// 使用 Base62 可以用更短的字符串表示更大的数字
-// 5位Base62 = 62^5 = 916,132,832 个ID（约9亿）
-// 6位Base62 = 62^6 = 56,800,235,584 个ID（约568亿）
 std::string SharedMemoryPool::EncodeBase62(uint64_t num, size_t minLength) {
     const char* base62_chars = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
     std::string result;
@@ -137,8 +134,6 @@ uint64_t SharedMemoryPool::DecodeBase62(const std::string& str) {
 }
 
 // 生成下一个可用的 memory_id（O(1) 时间复杂度）
-// 使用 Base62 编码，支持更大的 ID 范围
-// 格式：memory_xxxxx（xxxxx 是 Base62 编码，默认5位，可扩展到6位或更多）
 std::string SharedMemoryPool::GenerateNextMemoryId() const {
     uint64_t currentId = next_memory_id_counter_++;
 
@@ -265,6 +260,9 @@ void SharedMemoryPool::Compact() {
             freePos++;
         }
     }
+
+    // 更新空闲块计数
+    free_block_count = kBlockCount - freePos;
 }
 
 // 分配内存
