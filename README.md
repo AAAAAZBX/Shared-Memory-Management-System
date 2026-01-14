@@ -214,7 +214,7 @@ cd server
 #### 方式二：手动编译
 ```bash
 cd server
-g++ -std=c++17 -Wall main.cpp command/commands.cpp shared_memory_pool/shared_memory_pool.cpp persistence/persistence.cpp -o main.exe
+g++ -std=c++17 -Wall main.cpp command/commands.cpp ../core/shared_memory_pool/shared_memory_pool.cpp ../core/persistence/persistence.cpp network/protocol.cpp network/tcp_server.cpp -o main.exe -lws2_32
 .\main.exe
 ```
 
@@ -299,41 +299,51 @@ Last Modified: 2024-01-15 10:30:45
 
 ```
 Shared-Memory-Manage-System/
-├── server/                               # 服务器端程序
-│   ├── main.cpp                          # 主程序入口，REPL 循环
-│   ├── command/                          # 命令处理模块
-│   │   ├── commands.h                    # 命令处理声明
-│   │   └── commands.cpp                  # 命令处理实现（支持 Memory ID 系统）
-│   ├── shared_memory_pool/               # 内存池核心模块
-│   │   ├── shared_memory_pool.h          # 内存池类声明（Memory ID 系统）
-│   │   └── shared_memory_pool.cpp        # 内存池实现
+├── core/                                 # 核心库（未来可编译成 DLL）
+│   ├── shared_memory_pool/              # 内存池核心模块
+│   │   ├── shared_memory_pool.h         # 内存池类声明
+│   │   └── shared_memory_pool.cpp       # 内存池实现
 │   ├── persistence/                      # 持久化模块
-│   │   ├── persistence.h                 # 持久化模块声明
-│   │   └── persistence.cpp               # 持久化实现（版本3，支持 Memory ID）
-│   ├── network/                           # 网络模块（TCP 客户端接口）
-│   │   ├── tcp_server.h                  # TCP 服务器声明
-│   │   ├── tcp_server.cpp                # TCP 服务器实现（支持 Memory ID 系统）
-│   │   ├── protocol.h                    # 网络协议定义
-│   │   ├── protocol.cpp                  # 协议编解码实现
-│   │   └── README_TCP.md                 # TCP 客户端接口设计说明
-│   ├── MEMORY_POOL_SIZE_GUIDE.md         # 内存池大小配置指南
-│   ├── run.bat                           # 编译运行脚本
-│   └── build.bat                         # 编译脚本
+│   │   ├── persistence.h                # 持久化模块声明
+│   │   └── persistence.cpp              # 持久化实现（版本3）
+│   └── api/                              # C API 包装层
+│       ├── smm_api.h                    # C API 头文件
+│       └── smm_api.cpp                  # C API 实现
+├── server/                               # 服务器端程序（使用 core/）
+│   ├── main.cpp                         # 主程序入口，REPL 循环
+│   ├── command/                         # 命令处理模块
+│   │   ├── commands.h                   # 命令处理声明
+│   │   └── commands.cpp                 # 命令处理实现
+│   ├── network/                          # 网络模块（TCP 客户端接口）
+│   │   ├── tcp_server.h                # TCP 服务器声明
+│   │   ├── tcp_server.cpp              # TCP 服务器实现
+│   │   ├── protocol.h                  # 网络协议定义
+│   │   ├── protocol.cpp                 # 协议编解码实现
+│   │   └── README_TCP.md               # TCP 客户端接口设计说明
+│   ├── MEMORY_POOL_SIZE_GUIDE.md        # 内存池大小配置指南
+│   ├── run.bat                          # 编译运行脚本
+│   └── build.bat                        # 编译脚本
+├── sdk/                                  # SDK 发布包结构
+│   ├── include/                         # 头文件目录
+│   ├── lib/                             # 库文件目录
+│   ├── docs/                            # 文档目录
+│   ├── examples/                        # 示例代码目录
+│   │   └── basic_usage.cpp              # C API 基础使用示例
+│   └── README.md                        # SDK 说明
 ├── client/                               # 客户端实现
-│   ├── client.py                         # 客户端参考实现
-│   └── README.md                         # 客户端实现指南（适用于所有语言）
-├── sample/                               # 示例文件目录
-│   ├── env.txt                           # 6KB 文件示例（2 blocks）
-│   ├── error.txt                         # 153KB 文件示例
-│   └── 测试中文.txt                      # 中文测试文件
-├── doc.md                                # 技术文档（面向开发者）
-├── README.md                             # 项目说明文档（本文件）
-├── details.md                            # 项目需求文档
-├── FILE_UPLOAD_FEATURE.md                # 文件上传功能文档
-├── MEMORY_POOL_SIZE_SOLUTION.md          # 内存池大小解决方案文档
-├── problem.txt                           # 问题记录
-├── instractions.txt                      # 说明文件
-└── .gitignore                            # Git 忽略配置
+│   ├── client.py                        # 客户端参考实现
+│   └── README.md                        # 客户端实现指南（适用于所有语言）
+├── sample/                              # 示例文件目录
+│   ├── env.txt                          # 6KB 文件示例（2 blocks）
+│   ├── error.txt                        # 153KB 文件示例
+│   └── 测试中文.txt                     # 中文测试文件
+├── doc.md                               # 技术文档（面向开发者）
+├── README.md                            # 项目说明文档（本文件）
+├── details.md                           # 项目需求文档
+├── DLL_SDK_GUIDE.md                     # DLL/SDK 打包指南
+├── JAVA_GC_REFERENCE.md                # Java GC 原理参考
+├── problem.txt                         # 问题记录
+└── instractions.txt                     # 说明文件
 ```
 
 ## 技术栈
@@ -372,7 +382,7 @@ Shared-Memory-Manage-System/
 | 表格显示优化   | ✅ 完成   | 100%   |
 | 内存池扩展(1G) | ✅ 完成   | 100%   |
 | 紧凑算法优化   | ⏳ 计划中 | 0%     |
-| SDK/DLL 打包   | ⏳ 计划中 | 0%     |
+| SDK/DLL 打包   | 🔄 进行中 | 40%    |
 
 ## 待实现功能
 
@@ -398,11 +408,13 @@ Shared-Memory-Manage-System/
 - [ ] 优化碎片整理策略
 - [ ] 支持增量紧凑（部分紧凑）
 
-#### 3. SDK/DLL 打包（计划中）
-- [ ] 将核心功能打包为 DLL
-- [ ] 提供 C/C++ SDK 接口
-- [ ] 提供头文件和库文件
-- [ ] 编写 SDK 使用文档和示例
+#### 3. SDK/DLL 打包（部分完成）
+- [x] 目录结构重组（core/、sdk/）
+- [x] C API 包装层实现（core/api/）
+- [x] SDK 基础示例代码（sdk/examples/）
+- [ ] 编译为 DLL
+- [ ] 提供完整的 SDK 文档
+- [ ] 多语言绑定（C#、Python、Java 等）
 
 #### 4. 文件上传功能 ✅（已完成）
 - [x] 支持服务器端通过 `alloc` 命令上传文件（`.txt` 格式）
@@ -435,7 +447,7 @@ Shared-Memory-Manage-System/
    - **注意**：TCP 连接功能目前存在一些问题，正在修复中
 2. **Memory ID 系统**：使用 `memory_00001`, `memory_00002` 等唯一标识符区分内存块，所有客户端共享访问
 3. **数据持久化**：功能已完成，支持程序退出时自动保存状态（Ctrl+C、Ctrl+Z、quit/exit）
-4. **内存池大小**：可在 `shared_memory_pool/shared_memory_pool.h` 中通过 `kPoolSize` 常量调整（当前为 1GB，已修复栈溢出问题）
+4. **内存池大小**：可在 `core/shared_memory_pool/shared_memory_pool.h` 中通过 `kPoolSize` 常量调整（当前为 1GB，已修复栈溢出问题）
 5. **编译器要求**：建议使用支持 C++17 的编译器（g++ 7.0+ 或 MSVC 2017+）
 6. **块 ID 格式**：显示格式为 3 位数字，不足 3 位用 0 填充（如 `block_000`, `block_030`）
 7. **持久化文件**：`memory_pool.dat` 保存在服务器程序运行目录，不应提交到版本控制（已在 `.gitignore` 中配置）
@@ -537,7 +549,7 @@ Shared-Memory-Manage-System/
 **未来开发计划**：
 - ✅ **内存池扩展**：已完成，当前支持 1GB 内存池（已修复栈溢出问题）
 - ⏳ **紧凑算法优化**：改进内存紧凑算法，提高效率
-- ⏳ **SDK/DLL 打包**：将核心功能打包为 DLL，提供 C/C++ SDK 接口
+- 🔄 **SDK/DLL 打包**：目录结构已重组，C API 包装层已实现（40% 完成）
 - ⚠️ **TCP 连接修复**：修复 TCP 连接功能存在的问题
 - ⏳ **客户端文件上传**：支持客户端通过 TCP 上传文件到内存池
 

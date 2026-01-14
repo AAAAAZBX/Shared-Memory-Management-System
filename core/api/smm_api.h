@@ -4,6 +4,7 @@
 // C API for cross-language compatibility
 
 #include <stddef.h>
+#include <time.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -16,6 +17,26 @@ extern "C" {
 
 // 类型定义
 typedef void* SMM_PoolHandle;
+
+// 状态信息结构
+typedef struct {
+    size_t total_blocks;    // 总块数
+    size_t free_blocks;     // 空闲块数
+    size_t used_blocks;     // 已使用块数
+    size_t allocated_count; // 已分配的内存项数量
+    size_t pool_size;       // 内存池总大小（字节）
+    size_t block_size;      // 块大小（字节）
+} SMM_StatusInfo;
+
+// 内存信息结构
+typedef struct {
+    char memory_id[64];    // 内存ID
+    char description[256]; // 描述
+    size_t start_block;    // 起始块ID
+    size_t block_count;    // 块数量
+    size_t data_size;      // 实际数据大小（字节）
+    time_t last_modified;  // 最后修改时间（Unix时间戳）
+} SMM_MemoryInfo;
 
 // 错误码
 typedef enum {
@@ -59,9 +80,9 @@ SMM_API SMM_ErrorCode smm_read(SMM_PoolHandle pool, const char* memory_id, void*
                                size_t buffer_size, size_t* actual_size);
 
 // 查询操作
-SMM_API SMM_ErrorCode smm_get_status(SMM_PoolHandle pool, void* status_out);
+SMM_API SMM_ErrorCode smm_get_status(SMM_PoolHandle pool, SMM_StatusInfo* status_out);
 SMM_API SMM_ErrorCode smm_get_memory_info(SMM_PoolHandle pool, const char* memory_id,
-                                          void* info_out);
+                                          SMM_MemoryInfo* info_out);
 
 // 紧凑操作
 SMM_API SMM_ErrorCode smm_compact(SMM_PoolHandle pool);

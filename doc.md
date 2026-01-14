@@ -15,9 +15,9 @@
   - [1. 系统架构](#1-系统架构)
     - [1.1 整体架构](#11-整体架构)
     - [1.2 模块划分](#12-模块划分)
-      - [内存池模块 (`shared_memory_pool`)](#内存池模块-shared_memory_pool)
+      - [内存池模块 (`core/shared_memory_pool`)](#内存池模块-coreshared_memory_pool)
       - [命令处理模块 (`command`)](#命令处理模块-command)
-      - [持久化模块 (`persistence`)](#持久化模块-persistence)
+      - [持久化模块 (`core/persistence`)](#持久化模块-corepersistence)
       - [网络模块 (`network`)](#网络模块-network)
     - [1.3 数据流](#13-数据流)
       - [命令执行流程](#命令执行流程)
@@ -95,31 +95,49 @@
 
 ```
 Shared-Memory-Manage-System/
-├── server/                          # 服务器端程序
-│   ├── main.cpp                    # 服务器主程序入口
-│   ├── command/                    # 命令处理模块
-│   │   ├── commands.h              # 命令处理声明
-│   │   └── commands.cpp            # 命令处理实现
-│   ├── shared_memory_pool/         # 内存池核心模块
+├── core/                           # 核心库（未来可编译成 DLL）
+│   ├── shared_memory_pool/        # 内存池核心模块
 │   │   ├── shared_memory_pool.h   # 内存池类声明
 │   │   └── shared_memory_pool.cpp # 内存池类实现
 │   ├── persistence/                # 持久化模块
 │   │   ├── persistence.h          # 持久化接口声明
-│   │   └── persistence.cpp        # 持久化实现
+│   │   └── persistence.cpp         # 持久化实现
+│   └── api/                        # C API 包装层
+│       ├── smm_api.h              # C API 头文件
+│       └── smm_api.cpp            # C API 实现
+├── server/                         # 服务器端程序（使用 core/）
+│   ├── main.cpp                   # 服务器主程序入口
+│   ├── command/                    # 命令处理模块
+│   │   ├── commands.h             # 命令处理声明
+│   │   └── commands.cpp           # 命令处理实现
 │   ├── network/                    # 网络模块
 │   │   ├── tcp_server.h           # TCP 服务器声明
 │   │   ├── tcp_server.cpp         # TCP 服务器实现
 │   │   ├── protocol.h             # 网络协议定义
 │   │   ├── protocol.cpp           # 协议编解码实现
 │   │   └── README_TCP.md          # TCP 客户端接口设计说明
-│   ├── run.bat                     # 编译运行脚本
-│   └── build.bat                   # 编译脚本
+│   ├── MEMORY_POOL_SIZE_GUIDE.md  # 内存池大小配置指南
+│   ├── run.bat                    # 编译运行脚本
+│   └── build.bat                  # 编译脚本
+├── sdk/                            # SDK 发布包结构
+│   ├── include/                   # 头文件目录
+│   ├── lib/                       # 库文件目录
+│   ├── docs/                      # 文档目录
+│   ├── examples/                  # 示例代码目录
+│   │   └── basic_usage.cpp        # C API 基础使用示例
+│   └── README.md                  # SDK 说明
 ├── client/                         # 客户端实现
-│   ├── client.py                   # 客户端参考实现
-│   └── README.md                   # 客户端实现指南（适用于所有语言）
+│   ├── client.py                  # 客户端参考实现
+│   └── README.md                  # 客户端实现指南（适用于所有语言）
+├── sample/                         # 示例文件目录
+│   ├── env.txt                    # 6KB 文件示例
+│   ├── error.txt                  # 153KB 文件示例
+│   └── 测试中文.txt               # 中文测试文件
 ├── README.md                       # 项目说明文档（面向用户）
-├── doc.md                          # 技术文档（面向开发者）
-└── details.md                      # 项目需求文档
+├── doc.md                          # 技术文档（面向开发者，本文件）
+├── details.md                      # 项目需求文档
+├── DLL_SDK_GUIDE.md               # DLL/SDK 打包指南
+└── JAVA_GC_REFERENCE.md           # Java GC 原理参考
 ```
 
 ### 0.3 文件功能说明
@@ -127,11 +145,13 @@ Shared-Memory-Manage-System/
 #### 服务器端核心文件
 
 - **`main.cpp`**：程序入口，初始化内存池，启动 REPL 循环，处理信号
-- **`shared_memory_pool/`**：内存池核心，管理 1MB 内存空间，提供分配/释放/紧凑功能
-- **`command/`**：命令处理，解析用户命令，调用内存池接口
-- **`persistence/`**：持久化，保存/加载内存池状态到文件
-- **`network/`**：网络模块，TCP 服务器实现，支持多客户端并发连接
+- **`core/shared_memory_pool/`**：内存池核心，管理 1GB 内存空间，提供分配/释放/紧凑功能
+- **`core/persistence/`**：持久化，保存/加载内存池状态到文件
+- **`core/api/`**：C API 包装层，提供跨语言的 C 接口
+- **`server/command/`**：命令处理，解析用户命令，调用内存池接口
+- **`server/network/`**：网络模块，TCP 服务器实现，支持多客户端并发连接
 - **`client/`**：客户端实现指南和参考实现
+- **`sdk/`**：SDK 发布包结构，包含头文件、库文件、文档和示例
 
 
 ---
@@ -161,10 +181,11 @@ Shared-Memory-Manage-System/
 
 ### 1.2 模块划分
 
-#### 内存池模块 (`shared_memory_pool`)
+#### 内存池模块 (`core/shared_memory_pool`)
 - **职责**：管理固定大小的内存块分配
 - **核心类**：`SharedMemoryPool`
 - **数据结构**：`pool_`（1GB内存）、`meta_`（元数据数组，动态分配）、`used_map`（位图）、`memory_info`（内存块映射表）
+- **位置**：`core/shared_memory_pool/`（已从 `server/` 移至 `core/`）
 
 #### 命令处理模块 (`command`)
 - **职责**：解析和执行用户命令
@@ -172,11 +193,12 @@ Shared-Memory-Manage-System/
 - **支持命令**：help、status、alloc、read、free/delete、update、exec、compact、reset、quit、info
 - **Memory ID 系统**：使用 `memory_00001`, `memory_00002` 等唯一标识符，不再使用用户身份
 
-#### 持久化模块 (`persistence`)
+#### 持久化模块 (`core/persistence`)
 - **职责**：序列化/反序列化内存池状态
 - **核心函数**：`Persistence::Save()` / `Load()`
 - **文件格式**：二进制格式（版本3），包含文件头、元数据、位图、内存块信息、最后修改时间、内存池数据
 - **版本兼容**：支持加载版本1和版本2的旧文件
+- **位置**：`core/persistence/`（已从 `server/` 移至 `core/`）
 
 #### 网络模块 (`network`)
 - **职责**：TCP 服务器，提供客户端接口，处理客户端连接
