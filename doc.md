@@ -251,7 +251,11 @@ static constexpr size_t kBlockCount = kPoolSize / kBlockSize;  // 262,144 块
   - 为指定 Memory ID 分配内存并写入数据
   - 返回：起始块 ID（成功）或 -1（失败）
   - 自动计算所需块数，空间不足时触发紧凑
-- `std::string GenerateNextMemoryId()`：生成下一个可用的 Memory ID（memory_00001, memory_00002, ...）
+- `std::string GenerateNextMemoryId()`：生成下一个可用的 Memory ID（O(1) 时间复杂度）
+  - 使用 Base62 编码，格式：`memory_xxxxx`（xxxxx 是 Base62 编码）
+  - 5位支持约9亿个ID，6位支持约568亿个ID（自动扩展）
+  - 向后兼容旧的纯数字格式
+- `void InitializeMemoryIdCounter()`：初始化 Memory ID 计数器（从文件加载后调用）
 
 **内存释放**
 - `bool FreeByMemoryId(const std::string& memory_id)`：释放指定 Memory ID 的所有内存
@@ -482,6 +486,42 @@ struct BlockMeta {
 
 ### 3.2 核心算法
 
+#### Memory ID 生成算法（Base62 编码）
+
+**设计目标**：
+- O(1) 时间复杂度生成 ID
+- 超大容量（支持数亿到数百亿个ID）
+- 向后兼容旧格式
+
+**Base62 编码原理**：
+- 字符集：`0-9`, `a-z`, `A-Z`（共 62 个字符）
+- 5位Base62 = 916,132,832 个ID（约9亿）
+- 6位Base62 = 56,800,235,584 个ID（约568亿）
+
+**实现**：
+- 使用 `uint64_t` 计数器递增生成数字
+- Base62 编码将数字转换为字符串
+- 自动扩展：超过5位最大值时自动扩展到6位
+- 向后兼容：加载文件时自动识别旧格式（纯数字）和新格式（Base62）
+
+**ID 格式示例**：
+- `memory_00001`（第1个）
+- `memory_001C8`（第100个）
+- `memory_4c92`（第100万个）
+- `memory_zzzzz`（5位最大值，第916,132,832个）
+- `memory_000001`（自动扩展到6位）
+
+**性能**：
+- 生成 ID：O(1)
+- 编码：O(log₆₂(n)) ≈ O(1)
+- 初始化：O(m)，m 为已存在的内存块数（仅在加载时调用一次）
+
+**关键函数**：
+- `EncodeBase62(uint64_t num, size_t minLength)`：数字 → Base62 字符串
+- `DecodeBase62(const std::string& str)`：Base62 字符串 → 数字
+- `GenerateNextMemoryId()`：生成下一个 ID（O(1)）
+- `InitializeMemoryIdCounter()`：初始化计数器（加载时调用）
+
 #### 内存分配算法
 
 **流程**：
@@ -664,12 +704,13 @@ SetConsoleCP(65001);        // UTF-8 code page
 
 ### 性能指标
 
-| 操作 | 时间复杂度 | 空间复杂度 |
-| ---- | ---------- | ---------- |
-| 分配 | O(n)       | O(1)       |
-| 释放 | O(1)       | O(1)       |
-| 紧凑 | O(n)       | O(1)       |
-| 查询 | O(1)       | O(1)       |
+| 操作        | 时间复杂度 | 空间复杂度 |
+| ----------- | ---------- | ---------- |
+| 分配        | O(n)       | O(1)       |
+| 释放        | O(1)       | O(1)       |
+| 紧凑        | O(n)       | O(1)       |
+| 查询        | O(1)       | O(1)       |
+| **ID 生成** | **O(1)**   | O(1)       |
 
 **空间占用**：
 - 内存池：1GB（262,144 × 4KB 块）
@@ -681,7 +722,13 @@ SetConsoleCP(65001);        // UTF-8 code page
 ### 常见问题
 
 **Q: 内存池大小是多少？**  
-A: 当前配置为 1GB（262,144 × 4KB 块）。可通过修改 `shared_memory_pool.h` 中的 `kPoolSize` 常量调整大小。已修复栈溢出问题，支持更大的内存池。
+A: 当前配置为 1GB（262,144 × 4KB 块）。可通过修改 `core/shared_memory_pool/shared_memory_pool.h` 中的 `kPoolSize` 常量调整大小。已修复栈溢出问题，支持更大的内存池。
+
+**Q: Memory ID 会用完吗？**  
+A: 不会。系统使用 Base62 编码，5位支持约9亿个ID，6位支持约568亿个ID。即使每天分配100万个ID，也需要约50,000年才能用完6位Base62的容量。系统会自动扩展位数。
+
+**Q: Memory ID 格式是什么？**  
+A: 格式为 `memory_xxxxx`，其中 `xxxxx` 是 Base62 编码（0-9, a-z, A-Z）。例如：`memory_00001`（第1个）、`memory_001C8`（第100个）、`memory_4c92`（第100万个）。系统向后兼容旧的纯数字格式。
 
 **Q: 持久化文件损坏怎么办？**  
 A: 程序会自动检测文件格式，如果损坏会使用新内存池。可以删除损坏的文件重新开始。

@@ -32,8 +32,10 @@ class SharedMemoryPool {
     // 获取内存最后修改时间
     time_t GetMemoryLastModifiedTime(const std::string& memory_id) const;
     std::string GetMemoryLastModifiedTimeString(const std::string& memory_id) const;
-    // 生成下一个可用的 memory_id
+    // 生成下一个可用的 memory_id（O(1) 时间复杂度）
     std::string GenerateNextMemoryId() const;
+    // 初始化 Memory ID 计数器（从已存在的 memory_info 中找出最大值）
+    void InitializeMemoryIdCounter();
 
     // 内存分配相关
     int FindContinuousFreeBlock(size_t blockCount); // 查找连续的空闲块
@@ -102,4 +104,11 @@ class SharedMemoryPool {
     std::map<std::string, std::pair<size_t, size_t>> memory_info; // 内存ID -> (起始块位置, 块数量)
     // 记录内存最后修改时间
     std::map<std::string, time_t> memory_last_modified_time; // 内存ID -> 最后修改时间戳
+    // Memory ID 计数器（O(1) 生成 ID）
+    mutable uint64_t next_memory_id_counter_ =
+        1; // 下一个可用的 Memory ID 编号（使用 uint64_t 支持更大范围）
+
+    // Base62 编码辅助函数（用于生成更紧凑的 ID）
+    static std::string EncodeBase62(uint64_t num, size_t minLength = 5);
+    static uint64_t DecodeBase62(const std::string& str);
 };

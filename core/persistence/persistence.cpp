@@ -240,6 +240,11 @@ bool Load(SharedMemoryPool& smp, const std::string& filename) {
         uint8_t* poolData = smp.GetPoolData();
         file.read(reinterpret_cast<char*>(poolData), SharedMemoryPool::kPoolSize);
 
+        // 10. 初始化 Memory ID 计数器（确保计数器大于所有已存在的 ID）
+        if (file.good()) {
+            smp.InitializeMemoryIdCounter();
+        }
+
         return file.good();
     } catch (...) {
         return false;

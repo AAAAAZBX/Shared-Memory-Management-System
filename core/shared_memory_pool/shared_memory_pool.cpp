@@ -5,6 +5,8 @@
 #include <ctime>
 #include <iomanip>
 #include <sstream>
+#include <cstdint>
+#include <cctype>
 
 // 初始化
 bool SharedMemoryPool::Init() {
@@ -34,6 +36,7 @@ void SharedMemoryPool::Reset() {
     }
     memory_info.clear();
     memory_last_modified_time.clear(); // Clear last modified times
+    next_memory_id_counter_ = 1;       // 重置计数器
 }
 
 // 设置元数据
@@ -82,23 +85,102 @@ void SharedMemoryPool::UpdateMemoryBlockCount(const std::string& memory_id, size
     }
 }
 
-// 生成下一个可用的 memory_id
+// Base62 编码：将数字转换为 Base62 字符串（0-9, a-z, A-Z）
+// 使用 Base62 可以用更短的字符串表示更大的数字
+// 5位Base62 = 62^5 = 916,132,832 个ID（约9亿）
+// 6位Base62 = 62^6 = 56,800,235,584 个ID（约568亿）
+std::string SharedMemoryPool::EncodeBase62(uint64_t num, size_t minLength) {
+    const char* base62_chars = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    std::string result;
+
+    if (num == 0) {
+        result = "0";
+    } else {
+        while (num > 0) {
+            result = base62_chars[num % 62] + result;
+            num /= 62;
+        }
+    }
+
+    // 填充到最小长度（左侧补0）
+    while (result.length() < minLength) {
+        result = "0" + result;
+    }
+
+    return result;
+}
+
+// Base62 解码：将 Base62 字符串转换为数字
+uint64_t SharedMemoryPool::DecodeBase62(const std::string& str) {
+    uint64_t result = 0;
+    uint64_t base = 1;
+
+    for (int i = static_cast<int>(str.length()) - 1; i >= 0; i--) {
+        char c = str[i];
+        uint64_t value = 0;
+
+        if (c >= '0' && c <= '9') {
+            value = c - '0';
+        } else if (c >= 'a' && c <= 'z') {
+            value = 10 + (c - 'a');
+        } else if (c >= 'A' && c <= 'Z') {
+            value = 36 + (c - 'A');
+        } else {
+            return 0; // 无效字符
+        }
+
+        result += value * base;
+        base *= 62;
+    }
+
+    return result;
+}
+
+// 生成下一个可用的 memory_id（O(1) 时间复杂度）
+// 使用 Base62 编码，支持更大的 ID 范围
+// 格式：memory_xxxxx（xxxxx 是 Base62 编码，默认5位，可扩展到6位或更多）
 std::string SharedMemoryPool::GenerateNextMemoryId() const {
-    int maxId = 0;
+    uint64_t currentId = next_memory_id_counter_++;
+
+    // 使用 Base62 编码，默认5位（支持约9亿个ID）
+    // 当超过 62^5 时，自动扩展到6位（支持约568亿个ID）
+    size_t minLength = (currentId < 916132832ULL) ? 5 : 6; // 62^5 = 916,132,832
+
+    std::string encoded = EncodeBase62(currentId, minLength);
+    return "memory_" + encoded;
+}
+
+// 初始化 Memory ID 计数器（从已存在的 memory_info 中找出最大值）
+// 在从文件加载后调用，确保计数器大于所有已存在的 ID
+// 支持旧格式（纯数字）和新格式（Base62编码）
+void SharedMemoryPool::InitializeMemoryIdCounter() {
+    uint64_t maxId = 0;
+
     for (const auto& entry : memory_info) {
         const std::string& id = entry.first;
         if (id.length() > 7 && id.substr(0, 7) == "memory_") {
-            try {
-                int currentId = std::stoi(id.substr(7));
-                maxId = std::max(maxId, currentId);
-            } catch (...) {
-                // 忽略解析错误
+            std::string suffix = id.substr(7);
+            uint64_t currentId = 0;
+
+            // 尝试解析：先尝试 Base62 解码，如果失败则尝试纯数字（向后兼容）
+            currentId = DecodeBase62(suffix);
+
+            // 如果 Base62 解码失败（返回0且suffix不是"0"），尝试纯数字解析（向后兼容）
+            if (currentId == 0 && suffix != "0") {
+                try {
+                    // 向后兼容：支持旧的纯数字格式（memory_00001）
+                    currentId = static_cast<uint64_t>(std::stoull(suffix));
+                } catch (...) {
+                    // 忽略解析错误
+                    continue;
+                }
             }
+
+            maxId = std::max(maxId, currentId);
         }
     }
-    std::ostringstream oss;
-    oss << "memory_" << std::setfill('0') << std::setw(5) << (maxId + 1);
-    return oss.str();
+
+    next_memory_id_counter_ = maxId + 1; // 设置为下一个可用的 ID
 }
 
 // 获取块元数据
