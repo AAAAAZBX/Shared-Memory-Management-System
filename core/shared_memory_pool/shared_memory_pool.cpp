@@ -169,9 +169,17 @@ uint64_t SharedMemoryPool::DecodeBase62(const std::string& str) {
 std::string SharedMemoryPool::GenerateNextMemoryId() const {
     uint64_t currentId = next_memory_id_counter_++;
 
-    // 使用 Base62 编码，默认5位（支持约9亿个ID）
-    // 当超过 62^5 时，自动扩展到6位（支持约568亿个ID）
-    size_t minLength = (currentId < 916132832ULL) ? 5 : 6; // 62^5 = 916,132,832
+    // 使用 Base62 编码，自动扩展位数：
+    // 5位：支持约9亿个ID（0 - 916,132,831）
+    // 6位：支持约568亿个ID（916,132,832 - 56,800,235,583）
+    // 7位：支持约3521亿个ID（56,800,235,584 - 3,521,614,606,207）
+    size_t minLength = 5;
+    if (currentId >= 916132832ULL) { // 62^5 = 916,132,832
+        minLength = 6;
+    }
+    if (currentId >= 56800235584ULL) { // 62^6 = 56,800,235,584
+        minLength = 7;
+    }
 
     std::string encoded = EncodeBase62(currentId, minLength);
     return "memory_" + encoded;
@@ -179,7 +187,7 @@ std::string SharedMemoryPool::GenerateNextMemoryId() const {
 
 // 初始化 Memory ID 计数器（从已存在的 memory_info 中找出最大值）
 // 在从文件加载后调用，确保计数器大于所有已存在的 ID
-// 支持旧格式（纯数字）和新格式（Base62编码）
+// 仅支持 Base62 编码格式
 void SharedMemoryPool::InitializeMemoryIdCounter() {
     uint64_t maxId = 0;
 
@@ -187,23 +195,11 @@ void SharedMemoryPool::InitializeMemoryIdCounter() {
         const std::string& id = entry.first;
         if (id.length() > 7 && id.substr(0, 7) == "memory_") {
             std::string suffix = id.substr(7);
-            uint64_t currentId = 0;
+            uint64_t currentId = DecodeBase62(suffix);
 
-            // 尝试解析：先尝试 Base62 解码，如果失败则尝试纯数字（向后兼容）
-            currentId = DecodeBase62(suffix);
-
-            // 如果 Base62 解码失败（返回0且suffix不是"0"），尝试纯数字解析（向后兼容）
-            if (currentId == 0 && suffix != "0") {
-                try {
-                    // 向后兼容：支持旧的纯数字格式（memory_00001）
-                    currentId = static_cast<uint64_t>(std::stoull(suffix));
-                } catch (...) {
-                    // 忽略解析错误
-                    continue;
-                }
+            if (currentId > 0 || suffix == "0") {
+                maxId = std::max(maxId, currentId);
             }
-
-            maxId = std::max(maxId, currentId);
         }
     }
 
