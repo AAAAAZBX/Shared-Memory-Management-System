@@ -2,10 +2,10 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
-#include <vector>
 #include <bitset>
 #include <map>
 #include <ctime>
+#include <cstdlib>
 
 class SharedMemoryPool {
   public:
@@ -19,7 +19,27 @@ class SharedMemoryPool {
         std::string description = ""; // 内容描述
     };
 
-    bool Init();  // 分配 1MB
+    SharedMemoryPool() : pool_(nullptr), meta_(nullptr) {
+    }
+    ~SharedMemoryPool() {
+        if (pool_) {
+            std::free(pool_);
+            pool_ = nullptr;
+        }
+        if (meta_) {
+            // 调用每个 BlockMeta 的析构函数（因为包含 std::string）
+            for (size_t i = 0; i < kBlockCount; ++i) {
+                meta_[i].~BlockMeta();
+            }
+            std::free(meta_);
+            meta_ = nullptr;
+        }
+    }
+    // 禁止拷贝构造和赋值
+    SharedMemoryPool(const SharedMemoryPool&) = delete;
+    SharedMemoryPool& operator=(const SharedMemoryPool&) = delete;
+
+    bool Init();  // 分配内存池
     void Reset(); // 清空所有块
 
     // 元信息操作
@@ -60,10 +80,10 @@ class SharedMemoryPool {
 
     // 持久化辅助接口（供 persistence.cpp 使用）
     const uint8_t* GetPoolData() const {
-        return pool_.data();
+        return pool_;
     }
     uint8_t* GetPoolData() {
-        return pool_.data();
+        return pool_;
     }
     size_t GetFreeBlockCount() const {
         return free_block_count;
@@ -94,9 +114,9 @@ class SharedMemoryPool {
     }
 
   private:
-    // 内存池
-    std::vector<uint8_t> pool_;   // 内存池数据
-    std::vector<BlockMeta> meta_; // 块的元信息（动态分配，支持大内存池）
+    // 内存池（使用 malloc 分配）
+    uint8_t* pool_;   // 内存池数据
+    BlockMeta* meta_; // 块的元信息（使用 malloc 分配）
     // 记录空闲数据块信息
     size_t free_block_count = kBlockCount; // 空闲块数量
     std::bitset<kBlockCount> used_map;     // 记录块是否被使用

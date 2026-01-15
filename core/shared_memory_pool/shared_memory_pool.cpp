@@ -7,32 +7,64 @@
 #include <sstream>
 #include <cstdint>
 #include <cctype>
+#include <cstdlib>
+#include <new>
+#include <set>
+#include <vector>
 
 // 初始化
 bool SharedMemoryPool::Init() {
-    try {
-        // 分配内存池数据
-        pool_.assign(kPoolSize, 0);
-        // 动态分配元信息数组（避免栈溢出）
-        meta_.resize(kBlockCount);
-        Reset();
-        return true;
-    } catch (const std::bad_alloc& e) {
-        return false; // 内存分配失败
-    } catch (...) {
-        return false;
+    // 如果已经初始化过，先释放旧内存
+    if (pool_) {
+        std::free(pool_);
+        pool_ = nullptr;
     }
+    if (meta_) {
+        // 调用每个 BlockMeta 的析构函数
+        for (size_t i = 0; i < kBlockCount; ++i) {
+            meta_[i].~BlockMeta();
+        }
+        std::free(meta_);
+        meta_ = nullptr;
+    }
+
+    // 使用 malloc 分配内存池数据
+    pool_ = static_cast<uint8_t*>(std::malloc(kPoolSize));
+    if (!pool_) {
+        return false; // 内存分配失败
+    }
+
+    // 使用 malloc 分配元信息数组
+    meta_ = static_cast<BlockMeta*>(std::malloc(sizeof(BlockMeta) * kBlockCount));
+    if (!meta_) {
+        std::free(pool_);
+        pool_ = nullptr;
+        return false; // 内存分配失败
+    }
+
+    // 使用 placement new 初始化每个 BlockMeta 对象（调用构造函数）
+    for (size_t i = 0; i < kBlockCount; ++i) {
+        new (meta_ + i) BlockMeta();
+    }
+
+    // 初始化内存
+    Reset();
+    return true;
 }
 
 // 重置
 void SharedMemoryPool::Reset() {
-    std::fill(pool_.begin(), pool_.end(), 0);
+    if (pool_) {
+        std::memset(pool_, 0, kPoolSize);
+    }
     free_block_count = kBlockCount;
     for (size_t i = 0; i < kBlockCount; i++) {
         used_map.set(i, false);
     }
-    for (auto& m : meta_) {
-        m = BlockMeta{};
+    if (meta_) {
+        for (size_t i = 0; i < kBlockCount; i++) {
+            meta_[i] = BlockMeta{};
+        }
     }
     memory_info.clear();
     memory_last_modified_time.clear(); // Clear last modified times
@@ -221,44 +253,56 @@ size_t SharedMemoryPool::GetMaxContinuousFreeBlocks() const {
 
 // 紧凑内存
 void SharedMemoryPool::Compact() {
-    // 找到第一个空闲块的位置
-    size_t freePos = 0;
-    // 记录每个 memory_id 的新起始位置（避免重复更新）
-    std::map<std::string, size_t> newStartPositions;
+    size_t freePos = 0; // 下一个空闲位置
+    // 记录已经处理过的 memory_id，避免重复处理
+    std::set<std::string> processed;
 
-    // 从前往后遍历，将已使用的块移动到前面
-    for (size_t i = 0; i < kBlockCount; ++i) {
-        if (used_map[i]) {
-            const std::string& memory_id = meta_[i].memory_id;
+    // 按 memory_id 为单位移动：遍历 memory_info，按原始起始位置排序
+    std::vector<std::pair<std::string, std::pair<size_t, size_t>>> sortedEntries;
+    for (const auto& entry : memory_info) {
+        sortedEntries.push_back(entry);
+    }
+    // 按起始块位置排序
+    std::sort(sortedEntries.begin(), sortedEntries.end(),
+              [](const auto& a, const auto& b) { return a.second.first < b.second.first; });
 
-            // 如果当前块已使用，且不在正确位置，需要移动
-            if (i != freePos) {
-                // 移动数据
-                memcpy(pool_.data() + freePos * kBlockSize, pool_.data() + i * kBlockSize,
-                       kBlockSize);
-                // 移动元数据
-                meta_[freePos] = meta_[i];
-                // 清理源位置的元数据
-                meta_[i] = BlockMeta{};
-                // 更新 used_map
-                used_map.set(freePos, true);
-                used_map.set(i, false);
-            }
+    // 遍历每个 memory_id，移动其所有块
+    for (const auto& entry : sortedEntries) {
+        const std::string& memory_id = entry.first;
+        size_t oldStartBlock = entry.second.first;
+        size_t blockCount = entry.second.second;
 
-            // 更新内存信息中的起始块位置（只更新一次，对于每个 memory_id 的第一个块）
-            if (!memory_id.empty()) {
-                if (newStartPositions.find(memory_id) == newStartPositions.end()) {
-                    // 这是该 memory_id 的第一个块，记录新起始位置
-                    newStartPositions[memory_id] = freePos;
-                    auto it = memory_info.find(memory_id);
-                    if (it != memory_info.end()) {
-                        it->second.first = freePos;
-                    }
-                }
-            }
-
-            freePos++;
+        // 跳过已处理的 memory_id
+        if (processed.find(memory_id) != processed.end()) {
+            continue;
         }
+
+        // 移动这个 memory_id 的所有块
+        for (size_t j = 0; j < blockCount; ++j) {
+            size_t srcBlock = oldStartBlock + j;
+            size_t dstBlock = freePos + j;
+
+            if (srcBlock != dstBlock) {
+                // 移动数据
+                memcpy(pool_ + dstBlock * kBlockSize, pool_ + srcBlock * kBlockSize, kBlockSize);
+                // 移动元数据
+                meta_[dstBlock] = meta_[srcBlock];
+                // 清理源位置
+                meta_[srcBlock] = BlockMeta{};
+                // 更新 used_map
+                used_map.set(dstBlock, true);
+                used_map.set(srcBlock, false);
+            }
+        }
+
+        // 更新 memory_info 中的起始位置
+        auto it = memory_info.find(memory_id);
+        if (it != memory_info.end()) {
+            it->second.first = freePos;
+        }
+
+        processed.insert(memory_id);
+        freePos += blockCount;
     }
 
     // 更新空闲块计数
@@ -301,13 +345,12 @@ int SharedMemoryPool::AllocateBlock(const std::string& memory_id, const std::str
         size_t bytesToWrite = std::min(kBlockSize, dataSize - bytesWritten);
 
         // 写入数据
-        memcpy(pool_.data() + blockId * kBlockSize,
-               static_cast<const uint8_t*>(data) + bytesWritten, bytesToWrite);
+        memcpy(pool_ + blockId * kBlockSize, static_cast<const uint8_t*>(data) + bytesWritten,
+               bytesToWrite);
 
         // 如果块没有写满，剩余部分清零
         if (bytesToWrite < kBlockSize) {
-            memset(pool_.data() + blockId * kBlockSize + bytesToWrite, 0,
-                   kBlockSize - bytesToWrite);
+            memset(pool_ + blockId * kBlockSize + bytesToWrite, 0, kBlockSize - bytesToWrite);
         }
 
         // 设置元数据
@@ -402,7 +445,7 @@ std::string SharedMemoryPool::GetMemoryContentAsString(const std::string& memory
     size_t totalSize = blockCount * kBlockSize;
 
     // 直接从内存池读取，遇到0停止
-    const uint8_t* data = pool_.data() + startBlock * kBlockSize;
+    const uint8_t* data = pool_ + startBlock * kBlockSize;
     std::string result;
 
     for (size_t i = 0; i < totalSize; ++i) {

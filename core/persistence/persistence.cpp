@@ -133,6 +133,8 @@ bool Load(SharedMemoryPool& smp, const std::string& filename) {
         smp.Reset();
 
         // 3. 读取元数据（先读取，暂存）
+        // 注意：std::vector 在堆上分配，不会导致栈溢出
+        // 对于 262,144 个块，每个 MetaData 约 50-100 字节，总共约 13-26 MB，在堆上是安全的
         struct MetaData {
             bool used;
             std::string memory_id;
@@ -251,6 +253,3 @@ bool Load(SharedMemoryPool& smp, const std::string& filename) {
     }
 }
 } // namespace Persistence
-
-
-
