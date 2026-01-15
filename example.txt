@@ -1,0 +1,8 @@
+alloc "njzf.txt" "1145141919810"
+alloc "njzfkj.txt" "114514"
+alloc "zbx.txt" "1111111111111111111111111111111111111111111111111111111111111111111111111"
+status --memory
+alloc "测试中文" @"../sample/测试中文.txt"
+alloc "测试 6KB" @"../sample/env.txt"
+alloc "测试 153KB" @"../sample/error.txt"
+status --memory

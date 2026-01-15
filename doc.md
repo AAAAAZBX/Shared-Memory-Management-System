@@ -301,7 +301,7 @@ struct CommandSpec {
 
 - **help [command]**：显示帮助信息
 - **status [--memory|--block]**：显示内存池状态
-  - `status --memory`：显示 Memory ID、Description、Bytes（实际数据大小）、Range、Last Modified
+  - `status --memory`：显示 Memory ID、Description、Bytes（实际数据大小）、Range（格式：`block_000 - block_015(16 blocks, 64KB)`，包含块数和大小信息）、Last Modified
   - `status --block`：显示已使用的块信息
   - 支持中文显示，表格列自动对齐（中文字符按 2 个显示宽度计算）
 - **info**：显示系统综合信息

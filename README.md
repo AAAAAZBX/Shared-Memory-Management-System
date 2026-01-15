@@ -53,8 +53,8 @@
 - 修复了多块内存的起始位置更新问题，确保 compact 后所有已使用的块连续排列
 
 #### 6. 状态查询（`status`）
-- `status --memory`：显示内存池使用情况，按 Memory ID 展示占用范围（格式：`block_000 - block_015`）
-  - 包含列：Memory ID、Description、Bytes（实际数据大小）、Range、Last Modified
+- `status --memory`：显示内存池使用情况，按 Memory ID 展示占用范围（格式：`block_000 - block_015(16 blocks, 64KB)`）
+  - 包含列：Memory ID、Description、Bytes（实际数据大小）、Range（包含块数和大小信息）、Last Modified
   - 支持中文显示，表格列自动对齐（中文字符按 2 个显示宽度计算）
 - `status --block`：只显示已使用的块，包括 Memory ID、描述和最后修改时间（格式：`block_000`, `block_001` 等）
   - 支持中文显示，表格列自动对齐
@@ -271,10 +271,10 @@ server> quit
 **`status --memory` 输出：**
 ```
 Memory Pool Status:
-| MemoryID     | Description | Bytes | range                 | Last Modified       |
-| ------------ | ----------- | ----- | --------------------- | ------------------- |
-| memory_00001 | User Data   | 13    | block_000 - block_015 | 2024-01-15 10:30:45 |
-| memory_00002 | Config Data | 256   | block_016 - block_031 | 2024-01-15 11:20:10 |
+| MemoryID     | Description | Bytes | range                                      | Last Modified       |
+| ------------ | ----------- | ----- | ------------------------------------------ | ------------------- |
+| memory_00001 | User Data   | 13    | block_000 - block_015(16 blocks, 64KB)     | 2024-01-15 10:30:45 |
+| memory_00002 | Config Data | 256   | block_016 - block_031(16 blocks, 64KB)     | 2024-01-15 11:20:10 |
 ```
 
 **`status --block` 输出：**

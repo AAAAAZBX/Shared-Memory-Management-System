@@ -343,11 +343,9 @@ void HandleCommand(const std::vector<std::string>& tokens, SharedMemoryPool& smp
         if (mode == "--memory") {
             // 原来的 status 命令内容
             std::cout << "Memory Pool Status:\n";
-            std::cout << "|    MemoryID    |    Description    |      Bytes      |          range  "
-                         "        |    Last "
+            std::cout << "|    MemoryID    |    Description    |      Bytes      |                    range                    |    Last "
                          "Modified    |\n";
-            std::cout << "|----------------|-------------------|-----------------|-----------------"
-                         "--------|----------"
+            std::cout << "|----------------|-------------------|-----------------|--------------------------------------------|----------"
                          "-----------|\n";
 
             // 使用指针避免复制数据，按起始 block 排序
@@ -364,11 +362,16 @@ void HandleCommand(const std::vector<std::string>& tokens, SharedMemoryPool& smp
             });
 
             for (const auto* entry : sortedEntries) {
+                size_t blockCount = entry->second.second;
+                size_t totalBytes = blockCount * SharedMemoryPool::kBlockSize;
+                size_t totalKB = totalBytes / 1024;
+                
                 std::ostringstream rangeStream;
                 rangeStream << "block_" << std::setfill('0') << std::setw(3) << entry->second.first
                             << " - "
                             << "block_" << std::setfill('0') << std::setw(3)
-                            << (entry->second.first + entry->second.second - 1);
+                            << (entry->second.first + entry->second.second - 1)
+                            << "(" << blockCount << " blocks, " << totalKB << "KB)";
                 std::string rangeStr = rangeStream.str();
                 const auto& meta = smp.GetMeta(entry->second.first);
                 std::string description = meta.description.empty() ? "-" : meta.description;
@@ -387,7 +390,7 @@ void HandleCommand(const std::vector<std::string>& tokens, SharedMemoryPool& smp
                 description = TruncateToDisplayWidth(description, 17);
                 description = PadToDisplayWidth(description, 17);
                 std::string bytesFormatted = PadToDisplayWidth(bytesStr, 15);
-                std::string range = PadToDisplayWidth(rangeStr, 23);
+                std::string range = PadToDisplayWidth(rangeStr, 44);
                 std::string lastModified =
                     PadToDisplayWidth(smp.GetMemoryLastModifiedTimeString(entry->first), 19);
 
