@@ -49,8 +49,8 @@
 
 #### 5. 内存紧凑（`compact`）
 - 自动合并碎片，将已使用的块移动到内存池前端
-- 更新内存块信息映射关系
-- 修复了多块内存的起始位置更新问题，确保 compact 后所有已使用的块连续排列
+- 按 `memory_id` 为单位整体移动，确保同一内存的所有块连续移动
+- 更新内存块信息映射关系，确保 compact 后所有已使用的块连续排列
 
 #### 6. 状态查询（`status`）
 - `status --memory`：显示内存池使用情况，按 Memory ID 展示占用范围（格式：`block_000 - block_015(16 blocks, 64KB)`）
@@ -271,10 +271,10 @@ server> quit
 **`status --memory` 输出：**
 ```
 Memory Pool Status:
-| MemoryID     | Description | Bytes | range                                      | Last Modified       |
-| ------------ | ----------- | ----- | ------------------------------------------ | ------------------- |
-| memory_00001 | User Data   | 13    | block_000 - block_015(16 blocks, 64KB)     | 2024-01-15 10:30:45 |
-| memory_00002 | Config Data | 256   | block_016 - block_031(16 blocks, 64KB)     | 2024-01-15 11:20:10 |
+| MemoryID     | Description | Bytes | range                                  | Last Modified       |
+| ------------ | ----------- | ----- | -------------------------------------- | ------------------- |
+| memory_00001 | User Data   | 13    | block_000 - block_015(16 blocks, 64KB) | 2024-01-15 10:30:45 |
+| memory_00002 | Config Data | 256   | block_016 - block_031(16 blocks, 64KB) | 2024-01-15 11:20:10 |
 ```
 
 **`status --block` 输出：**
@@ -400,16 +400,16 @@ Shared-Memory-Manage-System/
 
 #### 1. 内存池扩展 ✅（已完成）
 - [x] 将内存池从 100MB 扩展到 1GB
-- [x] 修复栈溢出问题（使用 `std::vector` 替代 `std::array`）
-- [x] 支持动态分配元信息数组
+- [x] 修复栈溢出问题（使用 `malloc` 替代 `std::vector`，更底层可控）
+- [x] 支持动态分配元信息数组（使用 `malloc` + placement new）
+- [x] 优化内存分配方式，使用底层 `malloc`/`free` 管理
 - [ ] 优化大内存池的分配和释放性能（计划中）
-- [ ] 更新持久化格式以支持更大的内存池（计划中）
 
-#### 2. 内存紧凑算法优化（计划中）
-- [ ] 优化紧凑算法，提高效率
-- [ ] 减少内存拷贝次数
-- [ ] 优化碎片整理策略
-- [ ] 支持增量紧凑（部分紧凑）
+#### 2. 内存紧凑算法优化 ✅（已完成）
+- [x] 优化紧凑算法，按 `memory_id` 为单位整体移动
+- [x] 修复多块内存的移动问题，确保同一 `memory_id` 的所有块连续移动
+- [x] 按原始位置排序处理，确保移动顺序正确
+- [ ] 支持增量紧凑（部分紧凑）（计划中）
 
 #### 3. SDK/DLL 打包（部分完成）
 - [x] 目录结构重组（core/、sdk/）
@@ -456,7 +456,7 @@ Shared-Memory-Manage-System/
    - O(1) 生成，超大容量（5位约9亿，6位约568亿），向后兼容旧格式
    - 所有客户端共享访问
 3. **数据持久化**：功能已完成，支持程序退出时自动保存状态（Ctrl+C、Ctrl+Z、quit/exit）
-4. **内存池大小**：可在 `core/shared_memory_pool/shared_memory_pool.h` 中通过 `kPoolSize` 常量调整（当前为 1GB，已修复栈溢出问题）
+4. **内存池大小**：可在 `core/shared_memory_pool/shared_memory_pool.h` 中通过 `kPoolSize` 常量调整（当前为 1GB，使用 `malloc` 分配，避免栈溢出）
 5. **编译器要求**：建议使用支持 C++17 的编译器（g++ 7.0+ 或 MSVC 2017+）
 6. **块 ID 格式**：显示格式为 3 位数字，不足 3 位用 0 填充（如 `block_000`, `block_030`）
 7. **持久化文件**：`memory_pool.dat` 保存在服务器程序运行目录，不应提交到版本控制（已在 `.gitignore` 中配置）
@@ -467,9 +467,13 @@ Shared-Memory-Manage-System/
 
 ### v0.7.0 (当前版本)
 - ✅ **内存池扩展**：将内存池从 100MB 扩展到 1GB
-  - 修复栈溢出问题（使用 `std::vector` 替代 `std::array`）
-  - 支持动态分配元信息数组
+  - 修复栈溢出问题（使用 `malloc` 替代 `std::vector`，更底层可控）
+  - 支持动态分配元信息数组（使用 `malloc` + placement new）
   - 当前配置：1GB（262,144 个 4KB 块）
+- ✅ **内存紧凑算法优化**：修复 compact 函数实现
+  - 按 `memory_id` 为单位整体移动，确保同一内存的所有块连续移动
+  - 按原始位置排序处理，确保移动顺序正确
+  - 修复多块内存的移动问题
 - ✅ **文件上传功能增强**：支持中文路径
   - 支持 UTF-8 编码的中文文件路径
   - 使用 Windows API 处理宽字符路径

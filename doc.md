@@ -479,8 +479,8 @@ struct BlockMeta {
 
 #### 核心数据结构
 
-- **`pool_`**：`std::vector<uint8_t>`，1GB 连续内存空间
-- **`meta_`**：`std::vector<BlockMeta>`，262,144 个块的元数据（动态分配，避免栈溢出）
+- **`pool_`**：`uint8_t*`，使用 `malloc` 分配的 1GB 连续内存空间
+- **`meta_`**：`BlockMeta*`，使用 `malloc` 分配的 262,144 个块的元数据（使用 placement new 初始化，避免栈溢出）
 - **`used_map`**：`std::bitset<kBlockCount>`，使用状态位图
 - **`memory_info`**：`std::map<std::string, std::pair<size_t, size_t>>`，内存块映射表（key 为 Memory ID）
 - **`memory_last_modified_time`**：`std::map<std::string, time_t>`，记录每个 Memory ID 最后修改内存的时间戳
@@ -552,20 +552,20 @@ int FindContinuousFreeBlock(blockCount) {
 #### 内存紧凑算法
 
 **流程**：
-1. 找到第一个空闲块位置 `freePos`
-2. 从前往后遍历所有块
-3. 如果遇到已使用的块，将其移动到 `freePos`
-4. 更新元数据、位图和内存映射表
-5. 使用 `newStartPositions` 映射确保每个 memory_id 只更新一次起始位置
-6. `freePos++`，继续处理
+1. 按 `memory_id` 为单位处理，而不是按块处理
+2. 将 `memory_info` 按原始起始位置排序
+3. 遍历每个 `memory_id`，一次性移动其所有块到 `freePos` 开始的位置
+4. 更新 `memory_info` 中的起始位置
+5. `freePos` 增加该 `memory_id` 的块数，继续处理下一个
 
 **关键优化**：
-- 使用 `std::map<std::string, size_t> newStartPositions` 记录每个 memory_id 的新起始位置
-- 对于占用多个块的内存，只在第一个块时更新起始位置
+- 按 `memory_id` 为单位整体移动，确保同一内存的所有块连续移动
+- 按原始位置排序处理，确保移动顺序正确
+- 使用 `std::set` 记录已处理的 `memory_id`，避免重复处理
 - 确保 compact 后所有已使用的块连续排列，不留空隙
 
-**时间复杂度**：O(n)  
-**空间复杂度**：O(m)，m 为不同 memory_id 的数量（通常很小）
+**时间复杂度**：O(n + m log m)，n 为块数，m 为不同 memory_id 的数量（排序开销）
+**空间复杂度**：O(m)，m 为不同 memory_id 的数量
 
 #### 位图优化
 
@@ -605,8 +605,9 @@ int FindContinuousFreeBlock(blockCount) {
 
 **已完成的扩展**：
 - ✅ 将内存池扩展到 1GB（262,144 × 4KB 块）
-- ✅ 修复栈溢出问题：将 `std::array<BlockMeta, kBlockCount>` 改为 `std::vector<BlockMeta>`
-- ✅ 在 `Init()` 方法中动态分配元信息数组：`meta_.resize(kBlockCount)`
+- ✅ 修复栈溢出问题：将 `std::vector` 改为使用 `malloc` 分配（更底层可控）
+- ✅ 在 `Init()` 方法中使用 `malloc` 分配内存池和元信息数组
+- ✅ 使用 placement new 初始化 `BlockMeta` 对象（因为包含 `std::string`）
 - ✅ 更新 `kBlockCount` 的计算（自动计算）
 
 **当前配置**：
@@ -617,8 +618,10 @@ static constexpr size_t kBlockCount = kPoolSize / kBlockSize;  // 262,144 块
 ```
 
 **技术要点**：
-- 使用 `std::vector` 替代 `std::array` 避免栈溢出（1GB 内存池的元数据数组约 13-26 MB，超出默认栈大小）
+- 使用 `malloc`/`free` 替代 `std::vector` 分配内存（更底层可控，避免栈溢出）
 - 在 `Init()` 方法中动态分配，确保内存分配在堆上
+- 使用 placement new 初始化 `BlockMeta` 对象，确保 `std::string` 成员正确构造
+- 在析构函数中正确调用 `BlockMeta` 的析构函数，确保 `std::string` 成员正确析构
 - 持久化格式已支持更大的内存池（版本3）
 
 **计划优化**：
