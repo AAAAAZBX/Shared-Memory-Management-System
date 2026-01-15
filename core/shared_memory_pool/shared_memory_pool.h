@@ -100,6 +100,12 @@ class SharedMemoryPool {
     void SetMemoryInfo(const std::map<std::string, std::pair<size_t, size_t>>& info) {
         memory_info = info;
     }
+    size_t GetNextSearchPos() const {
+        return next_search_pos_;
+    }
+    void SetNextSearchPos(size_t pos) {
+        next_search_pos_ = pos;
+    }
     void UpdateMemoryBlockCount(const std::string& memory_id, size_t newBlockCount);
     // 获取和设置内存最后修改时间（供持久化使用）
     const std::map<std::string, time_t>& GetMemoryLastModifiedTimeMap() const {
@@ -127,6 +133,8 @@ class SharedMemoryPool {
     // Memory ID 计数器（O(1) 生成 ID）
     mutable uint64_t next_memory_id_counter_ =
         1; // 下一个可用的 Memory ID 编号（使用 uint64_t 支持更大范围）
+    // 搜索起始位置（Next Fit 优化）
+    size_t next_search_pos_ = 0; // 下次分配时开始搜索的位置，避免每次都从0开始
 
     // Base62 编码辅助函数（用于生成更紧凑的 ID）
     static std::string EncodeBase62(uint64_t num, size_t minLength = 5);

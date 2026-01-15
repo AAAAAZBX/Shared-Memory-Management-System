@@ -4,17 +4,15 @@
 #include <vector>
 
 namespace Persistence {
-// 文件格式版本号和魔数
-static constexpr uint32_t kFileVersion = 3;        // 版本3：使用 memory_id 和 description 替代 user
 static constexpr uint32_t kFileMagic = 0x4D454D50; // "MEMP"
 
 // 文件头结构
 struct FileHeader {
-    uint32_t magic;           // 文件魔数
-    uint32_t version;         // 文件格式版本
-    size_t free_block_count;  // 空闲块数量
-    size_t memory_info_count; // memory_info 的数量
-    uint64_t reserved[4];     // 预留字段
+    uint32_t magic;            // 文件魔数
+    uint32_t reserved_version; // 保留字段（不再使用）
+    size_t free_block_count;   // 空闲块数量
+    size_t memory_info_count;  // memory_info 的数量
+    uint64_t reserved[4];      // 预留字段
 };
 
 bool Save(const SharedMemoryPool& smp, const std::string& filename) {
@@ -27,7 +25,7 @@ bool Save(const SharedMemoryPool& smp, const std::string& filename) {
         // 1. 写入文件头
         FileHeader header{};
         header.magic = kFileMagic;
-        header.version = kFileVersion;
+        header.reserved_version = 0;
 
         // 获取内部数据（需要通过公共接口）
         const auto& memoryInfo = smp.GetMemoryInfo();
@@ -100,7 +98,11 @@ bool Save(const SharedMemoryPool& smp, const std::string& filename) {
             file.write(reinterpret_cast<const char*>(&timeValue), sizeof(time_t));
         }
 
-        // 6. 写入内存池数据
+        // 6. 写入 next_search_pos_（Next Fit 优化位置）
+        size_t nextSearchPos = smp.GetNextSearchPos();
+        file.write(reinterpret_cast<const char*>(&nextSearchPos), sizeof(size_t));
+
+        // 7. 写入内存池数据
         const uint8_t* poolData = smp.GetPoolData();
         file.write(reinterpret_cast<const char*>(poolData), SharedMemoryPool::kPoolSize);
 
@@ -124,17 +126,11 @@ bool Load(SharedMemoryPool& smp, const std::string& filename) {
         if (header.magic != kFileMagic) {
             return false;
         }
-        // 支持版本1、版本2和版本3
-        if (header.version != 1 && header.version != 2 && header.version != 3) {
-            return false;
-        }
 
         // 2. 重置内存池
         smp.Reset();
 
-        // 3. 读取元数据（先读取，暂存）
-        // 注意：std::vector 在堆上分配，不会导致栈溢出
-        // 对于 262,144 个块，每个 MetaData 约 50-100 字节，总共约 13-26 MB，在堆上是安全的
+        // 3. 读取元数据
         struct MetaData {
             bool used;
             std::string memory_id;
@@ -145,32 +141,20 @@ bool Load(SharedMemoryPool& smp, const std::string& filename) {
         for (size_t i = 0; i < SharedMemoryPool::kBlockCount; ++i) {
             file.read(reinterpret_cast<char*>(&metaData[i].used), sizeof(bool));
 
-            if (header.version >= 3) {
-                // 版本3：读取 memory_id 和 description
-                size_t memoryIdLen;
-                file.read(reinterpret_cast<char*>(&memoryIdLen), sizeof(size_t));
-                metaData[i].memory_id.resize(memoryIdLen);
-                if (memoryIdLen > 0) {
-                    file.read(&metaData[i].memory_id[0], memoryIdLen);
-                }
+            // 读取 memory_id
+            size_t memoryIdLen;
+            file.read(reinterpret_cast<char*>(&memoryIdLen), sizeof(size_t));
+            metaData[i].memory_id.resize(memoryIdLen);
+            if (memoryIdLen > 0) {
+                file.read(&metaData[i].memory_id[0], memoryIdLen);
+            }
 
-                size_t descLen;
-                file.read(reinterpret_cast<char*>(&descLen), sizeof(size_t));
-                metaData[i].description.resize(descLen);
-                if (descLen > 0) {
-                    file.read(&metaData[i].description[0], descLen);
-                }
-            } else {
-                // 版本1和2：读取 user（向后兼容）
-                size_t userLen;
-                file.read(reinterpret_cast<char*>(&userLen), sizeof(size_t));
-                std::string user(userLen, '\0');
-                if (userLen > 0) {
-                    file.read(&user[0], userLen);
-                }
-                // 将 user 转换为 memory_id（使用 user 作为 memory_id）
-                metaData[i].memory_id = user;
-                metaData[i].description = ""; // 旧版本没有 description
+            // 读取 description
+            size_t descLen;
+            file.read(reinterpret_cast<char*>(&descLen), sizeof(size_t));
+            metaData[i].description.resize(descLen);
+            if (descLen > 0) {
+                file.read(&metaData[i].description[0], descLen);
             }
         }
 
@@ -197,8 +181,6 @@ bool Load(SharedMemoryPool& smp, const std::string& filename) {
         }
 
         // 7. 读取并设置 memory_info
-        // 注意：旧版本文件中这个字段叫 user_info_count，但由于结构体内存布局相同，
-        // 读取时会自动映射到 memory_info_count 字段
         size_t infoCount = header.memory_info_count;
         std::map<std::string, std::pair<size_t, size_t>> memoryInfo;
         for (size_t i = 0; i < infoCount; ++i) {
@@ -218,31 +200,46 @@ bool Load(SharedMemoryPool& smp, const std::string& filename) {
         }
         smp.SetMemoryInfo(memoryInfo);
 
-        // 8. 读取 memory_last_modified_time（版本2和3）
-        if (header.version >= 2) {
-            size_t timeMapCount;
-            file.read(reinterpret_cast<char*>(&timeMapCount), sizeof(size_t));
-            std::map<std::string, time_t> timeMap;
-            for (size_t i = 0; i < timeMapCount; ++i) {
-                size_t keyLen;
-                file.read(reinterpret_cast<char*>(&keyLen), sizeof(size_t));
-                std::string key(keyLen, '\0');
-                if (keyLen > 0) {
-                    file.read(&key[0], keyLen);
-                }
-                time_t timeValue;
-                file.read(reinterpret_cast<char*>(&timeValue), sizeof(time_t));
-                timeMap[key] = timeValue;
+        // 8. 读取 memory_last_modified_time
+        size_t timeMapCount;
+        file.read(reinterpret_cast<char*>(&timeMapCount), sizeof(size_t));
+        std::map<std::string, time_t> timeMap;
+        for (size_t i = 0; i < timeMapCount; ++i) {
+            size_t keyLen;
+            file.read(reinterpret_cast<char*>(&keyLen), sizeof(size_t));
+            std::string key(keyLen, '\0');
+            if (keyLen > 0) {
+                file.read(&key[0], keyLen);
             }
-            smp.SetMemoryLastModifiedTimeMap(timeMap);
+            time_t timeValue;
+            file.read(reinterpret_cast<char*>(&timeValue), sizeof(time_t));
+            timeMap[key] = timeValue;
         }
-        // 版本1的文件没有时间信息，timeMap 保持为空
+        smp.SetMemoryLastModifiedTimeMap(timeMap);
 
-        // 9. 读取内存池数据
+        // 9. 读取 next_search_pos_
+        size_t nextSearchPos;
+        file.read(reinterpret_cast<char*>(&nextSearchPos), sizeof(size_t));
+        if (file.good()) {
+            smp.SetNextSearchPos(nextSearchPos);
+        } else {
+            // 如果读取失败，计算第一个空闲位置
+            size_t firstFreePos = 0;
+            for (size_t i = 0; i < SharedMemoryPool::kBlockCount; ++i) {
+                const auto& meta = smp.GetMeta(i);
+                if (!meta.used) {
+                    firstFreePos = i;
+                    break;
+                }
+            }
+            smp.SetNextSearchPos(firstFreePos);
+        }
+
+        // 10. 读取内存池数据
         uint8_t* poolData = smp.GetPoolData();
         file.read(reinterpret_cast<char*>(poolData), SharedMemoryPool::kPoolSize);
 
-        // 10. 初始化 Memory ID 计数器（确保计数器大于所有已存在的 ID）
+        // 11. 初始化 Memory ID 计数器（确保计数器大于所有已存在的 ID）
         if (file.good()) {
             smp.InitializeMemoryIdCounter();
         }

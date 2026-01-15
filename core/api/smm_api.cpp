@@ -41,19 +41,6 @@ static void SetError(SMM_ErrorCode error) {
     g_last_error = error;
 }
 
-// 版本信息
-SMM_ErrorCode smm_get_version(int* major, int* minor, int* patch) {
-    if (!major || !minor || !patch) {
-        SetError(SMM_ERROR_INVALID_PARAM);
-        return SMM_ERROR_INVALID_PARAM;
-    }
-    *major = SMM_VERSION_MAJOR;
-    *minor = SMM_VERSION_MINOR;
-    *patch = SMM_VERSION_PATCH;
-    SetError(SMM_SUCCESS);
-    return SMM_SUCCESS;
-}
-
 // 创建内存池
 SMM_PoolHandle smm_create_pool(size_t pool_size) {
     try {

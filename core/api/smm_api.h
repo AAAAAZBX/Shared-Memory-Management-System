@@ -10,11 +10,6 @@
 extern "C" {
 #endif
 
-// API 版本定义
-#define SMM_VERSION_MAJOR 1
-#define SMM_VERSION_MINOR 0
-#define SMM_VERSION_PATCH 0
-
 // 类型定义
 typedef void* SMM_PoolHandle;
 
@@ -61,9 +56,6 @@ typedef enum {
 // 非 Windows 平台或静态链接
 #define SMM_API
 #endif
-
-// 版本信息
-SMM_API SMM_ErrorCode smm_get_version(int* major, int* minor, int* patch);
 
 // 生命周期管理
 SMM_API SMM_PoolHandle smm_create_pool(size_t pool_size);

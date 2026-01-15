@@ -281,7 +281,9 @@ static constexpr size_t kBlockCount = kPoolSize / kBlockSize;  // 262,144 块
 
 #### 实现要点
 
-- **分配策略**：首次适配算法，找不到连续块时自动紧凑
+- **分配策略**：Next Fit（下次适配）算法，找不到连续块时自动紧凑
+  - 使用 `next_search_pos_` 记录搜索起始位置，避免每次都从0开始搜索
+  - 分配后更新为分配结束位置，compact 后更新为第一个空闲位置，free 后如果释放位置更靠前则更新
 - **紧凑算法**：O(n) 时间复杂度，原地操作
 - **时间复杂度**：分配 O(n)，释放 O(1)，查询 O(1)
 
@@ -482,6 +484,7 @@ struct BlockMeta {
 - **`used_map`**：`std::bitset<kBlockCount>`，使用状态位图
 - **`memory_info`**：`std::map<std::string, std::pair<size_t, size_t>>`，内存块映射表（key 为 Memory ID）
 - **`memory_last_modified_time`**：`std::map<std::string, time_t>`，记录每个 Memory ID 最后修改内存的时间戳
+- **`next_search_pos_`**：`size_t`，Next Fit 优化：记录下次分配时的搜索起始位置，避免每次都从0开始搜索
 
 ### 3.2 核心算法
 
@@ -531,24 +534,36 @@ struct BlockMeta {
 **流程**：
 1. 计算所需块数：`ceil(dataSize / 4KB)`
 2. 检查总空间是否足够
-3. 查找连续空闲块（首次适配）
+3. 查找连续空闲块（Next Fit 算法，从 `next_search_pos_` 开始搜索）
 4. 如果未找到但总空间足够，执行紧凑后重新查找
 5. 写入数据并更新元数据和映射表
+6. 更新 `next_search_pos_` 为分配结束位置
 
-**首次适配算法**：
+**Next Fit（下次适配）算法**：
 ```cpp
 int FindContinuousFreeBlock(blockCount) {
-    for (i = 0; i < kBlockCount; i++) {
+    // 从 next_search_pos_ 开始搜索（Next Fit 优化）
+    for (i = next_search_pos_; i < kBlockCount; i++) {
         if (used_map[i]) continue
         // 检查从 i 开始的连续空闲块
         j = i
         while (j < kBlockCount && !used_map[j]) j++
-        if (j - i >= blockCount) return i
+        if (j - i >= blockCount) {
+            next_search_pos_ = i + blockCount  // 更新搜索起始位置
+            return i
+        }
         i = j - 1  // 跳过已检查的块
     }
     return -1
 }
 ```
+
+**Next Fit 优化说明**：
+- 使用 `next_search_pos_` 记录上次分配结束位置，避免每次都从0开始搜索
+- 分配成功后更新 `next_search_pos_` 为分配结束位置
+- compact 后更新为第一个空闲位置
+- free 后如果释放位置更靠前，更新为释放位置
+- **优势**：减少搜索时间，提高分配效率（特别是连续分配场景）
 
 **时间复杂度**：O(n)，n 为块数
 

@@ -435,14 +435,15 @@ Shared-Memory-Manage-System/
 
 - **内存池大小**：1GB（262,144 × 4KB 块）
   - **已支持**：可通过修改 `core/shared_memory_pool/shared_memory_pool.h` 中的 `kPoolSize` 常量调整大小
-- **分配算法**：首次适配（First Fit）+ 自动紧凑
-  - **计划优化**：改进紧凑算法，提高效率
+- **分配算法**：Next Fit（下次适配）+ 自动紧凑
+  - **Next Fit 优化**：使用 `next_search_pos_` 记录搜索起始位置，避免每次都从0开始搜索
+  - **自动更新**：分配后更新为分配结束位置，compact 后更新为第一个空闲位置，free 后如果释放位置更靠前则更新
 - **Memory ID 生成**：O(1) 时间复杂度（Base62 编码）
   - **容量**：5位支持约9亿个ID，6位支持约568亿个ID，7位支持约3521亿个ID（自动扩展）
   - **格式**：`memory_xxxxx`（xxxxx 是 Base62 编码：0-9, a-z, A-Z）
 - **时间复杂度**：
-  - 分配：O(n) 最坏情况，n 为块数
-  - 紧凑：O(n)（计划优化为更高效的算法）
+  - 分配：O(n) 最坏情况，n 为块数（Next Fit 优化后平均情况更好）
+  - 紧凑：O(n + m log m)，n 为块数，m 为不同 memory_id 的数量
   - 释放：O(1)
   - 查询：O(1) 到 O(n)
   - **ID 生成**：O(1)

@@ -69,6 +69,7 @@ void SharedMemoryPool::Reset() {
     memory_info.clear();
     memory_last_modified_time.clear(); // Clear last modified times
     next_memory_id_counter_ = 1;       // 重置计数器
+    next_search_pos_ = 0;              // 重置搜索起始位置
 }
 
 // 设置元数据
@@ -215,7 +216,9 @@ const SharedMemoryPool::BlockMeta& SharedMemoryPool::GetMeta(size_t blockId) con
 int SharedMemoryPool::FindContinuousFreeBlock(size_t blockCount) {
     if (blockCount > free_block_count)
         return -1;
-    for (size_t i = 0; i < kBlockCount; i++) {
+
+    // 从 next_search_pos_ 开始搜索（Next Fit 优化）
+    for (size_t i = next_search_pos_; i < kBlockCount; i++) {
         if (used_map[i])
             continue;
         size_t j = i;
@@ -223,6 +226,7 @@ int SharedMemoryPool::FindContinuousFreeBlock(size_t blockCount) {
             ++j;
         }
         if (j - i >= blockCount) {
+            next_search_pos_ = i + blockCount; // 更新搜索起始位置为分配结束位置
             return i;
         }
         i = j - 1;
@@ -303,6 +307,9 @@ void SharedMemoryPool::Compact() {
 
     // 更新空闲块计数
     free_block_count = kBlockCount - freePos;
+
+    // 更新搜索起始位置为第一个空闲位置
+    next_search_pos_ = freePos;
 }
 
 // 分配内存
@@ -364,6 +371,8 @@ int SharedMemoryPool::AllocateBlock(const std::string& memory_id, const std::str
     // 更新最后修改时间
     memory_last_modified_time[memory_id] = std::time(nullptr);
 
+    // 更新搜索起始位置为分配位置+块数（next_search_pos_ 已经在 FindContinuousFreeBlock 中更新）
+
     return startBlock;
 }
 
@@ -381,6 +390,12 @@ bool SharedMemoryPool::FreeByMemoryId(const std::string& memory_id) {
     memory_info.erase(memory_id);
     memory_last_modified_time.erase(memory_id); // 删除最后修改时间记录
     free_block_count += count;
+
+    // 如果释放的位置更靠前，更新搜索起始位置
+    if (start < next_search_pos_) {
+        next_search_pos_ = start;
+    }
+
     return true;
 }
 
@@ -391,6 +406,12 @@ bool SharedMemoryPool::FreeByBlockId(size_t blockId) {
     used_map.set(blockId, false);
     meta_[blockId] = BlockMeta{};
     free_block_count++;
+
+    // 如果释放的位置更靠前，更新搜索起始位置
+    if (blockId < next_search_pos_) {
+        next_search_pos_ = blockId;
+    }
+
     return true;
 }
 
