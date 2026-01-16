@@ -7,29 +7,7 @@
 - [Shared Memory Management SDK](#shared-memory-management-sdk)
   - [目录](#目录)
   - [概述](#概述)
-  - [两种使用方式](#两种使用方式)
-    - [方式一：DLL/SDK 方式（推荐，本地调用）](#方式一dllsdk-方式推荐本地调用)
-      - [架构说明](#架构说明)
-      - [编译 DLL](#编译-dll)
-      - [使用方式](#使用方式)
-        - [方式一：动态链接（推荐）](#方式一动态链接推荐)
-        - [方式二：静态链接](#方式二静态链接)
-      - [API 参考](#api-参考)
-        - [生命周期管理](#生命周期管理)
-        - [内存操作](#内存操作)
-        - [查询操作](#查询操作)
-        - [其他操作](#其他操作)
-      - [完整示例](#完整示例)
-      - [与其他语言的集成](#与其他语言的集成)
-        - [Python (使用 ctypes)](#python-使用-ctypes)
-        - [C# (P/Invoke)](#c-pinvoke)
-      - [注意事项](#注意事项)
-      - [与 TCP 方式的区别](#与-tcp-方式的区别)
-      - [故障排除](#故障排除)
-        - [DLL 加载失败](#dll-加载失败)
-        - [链接错误](#链接错误)
-        - [运行时错误](#运行时错误)
-    - [方式二：TCP 客户端方式（远程访问）](#方式二tcp-客户端方式远程访问)
+  - [TCP 客户端方式（远程访问）](#tcp-客户端方式远程访问)
       - [客户端 SDK 概述](#客户端-sdk-概述)
         - [主要特性](#主要特性)
       - [完整流程：从服务器启动到远程客户端连接](#完整流程从服务器启动到远程客户端连接)
@@ -58,256 +36,11 @@
 
 ## 概述
 
-Shared Memory Management 系统提供两种 SDK 使用方式：
-
-1. **DLL/SDK 方式（推荐）**：Server 核心功能编译成 DLL，客户端直接链接使用，无需网络连接
-2. **TCP 客户端方式**：通过 TCP 连接到服务器进行操作（已废弃，推荐使用 DLL 方式）
-
-## 两种使用方式
-
-### 方式一：DLL/SDK 方式（推荐，本地调用）
-
-**Server 核心功能编译成 DLL**，客户端直接链接使用，无需网络连接。
-
-- 📦 **无需下载客户端工具**
-- 🚀 **高性能**：本地调用，无网络延迟
-- 🔗 **易于集成**：提供 C API，支持多种语言
-
-#### 架构说明
-
-```
-┌─────────────────┐
-│  客户端程序      │
-│  (你的应用)      │
-└────────┬────────┘
-         │ 直接链接 DLL
-         ▼
-┌─────────────────┐
-│   smm.dll        │  ← Server 核心功能（DLL）
-│  (共享内存管理)  │
-└─────────────────┘
-```
-
-**特点**：
-- ✅ **本地调用**：客户端直接调用 DLL，无需网络
-- ✅ **无需下载**：客户端只需链接 DLL，不需要单独的工具
-- ✅ **高性能**：本地调用，无网络延迟
-- ✅ **易于集成**：提供 C API，支持多种语言
-
-#### 编译 DLL
-
-**Windows**：
-
-```bash
-cd core
-build_dll.bat
-```
-
-输出文件：
-- `sdk/lib/smm.dll` - 动态链接库
-- `sdk/lib/smm.lib` - 导入库（用于链接）
-- `sdk/lib/libsmm.a` - 静态库
-- `sdk/include/smm_api.h` - 头文件（实际在 `core/api/smm_api.h`）
-
-**Linux**：
-
-```bash
-cd core
-g++ -std=c++17 -shared -fPIC -DSMM_BUILDING_DLL \
-    -Iapi -Ishared_memory_pool -Ipersistence \
-    api/smm_api.cpp \
-    shared_memory_pool/shared_memory_pool.cpp \
-    persistence/persistence.cpp \
-    -o ../sdk/lib/libsmm.so
-```
-
-#### 使用方式
-
-##### 方式一：动态链接（推荐）
-
-**1. 包含头文件**：
-
-```cpp
-#include "smm_api.h"
-```
-
-**2. 链接 DLL**：
-
-**编译时**：
-```bash
-g++ -std=c++17 your_program.cpp -I../sdk/include -L../sdk/lib -lsmm -o your_program.exe
-```
-
-**运行时**：
-- 确保 `smm.dll` 在可执行文件目录或系统 PATH 中
-
-**3. 使用 API**：
-
-```cpp
-// 创建内存池
-SMM_PoolHandle pool = smm_create_pool(1024 * 1024 * 1024);
-
-// 分配内存
-char memory_id[64];
-smm_alloc(pool, "描述", "内容", strlen("内容"), memory_id, sizeof(memory_id));
-
-// 读取内存
-char buffer[256];
-size_t actual_size;
-smm_read(pool, memory_id, buffer, sizeof(buffer), &actual_size);
-
-// 释放内存
-smm_free(pool, memory_id);
-
-// 销毁内存池
-smm_destroy_pool(pool);
-```
-
-##### 方式二：静态链接
-
-```bash
-g++ -std=c++17 your_program.cpp -I../sdk/include -L../sdk/lib -lsmm -static -o your_program.exe
-```
-
-静态链接后，不需要单独的 DLL 文件。
-
-#### API 参考
-
-##### 生命周期管理
-
-```cpp
-SMM_PoolHandle smm_create_pool(size_t pool_size);
-SMM_ErrorCode smm_destroy_pool(SMM_PoolHandle pool);
-SMM_ErrorCode smm_reset_pool(SMM_PoolHandle pool);
-```
-
-##### 内存操作
-
-```cpp
-SMM_ErrorCode smm_alloc(
-    SMM_PoolHandle pool,
-    const char* description,
-    const void* data,
-    size_t data_size,
-    char* memory_id_out,
-    size_t memory_id_size
-);
-
-SMM_ErrorCode smm_free(SMM_PoolHandle pool, const char* memory_id);
-
-SMM_ErrorCode smm_update(
-    SMM_PoolHandle pool,
-    const char* memory_id,
-    const void* new_data,
-    size_t new_data_size
-);
-
-SMM_ErrorCode smm_read(
-    SMM_PoolHandle pool,
-    const char* memory_id,
-    void* buffer,
-    size_t buffer_size,
-    size_t* actual_size
-);
-```
-
-##### 查询操作
-
-```cpp
-SMM_ErrorCode smm_get_status(SMM_PoolHandle pool, SMM_StatusInfo* status_out);
-SMM_ErrorCode smm_get_memory_info(SMM_PoolHandle pool, const char* memory_id, SMM_MemoryInfo* info_out);
-```
-
-##### 其他操作
-
-```cpp
-SMM_ErrorCode smm_compact(SMM_PoolHandle pool);
-SMM_ErrorCode smm_save(SMM_PoolHandle pool, const char* filename);
-SMM_ErrorCode smm_load(SMM_PoolHandle pool, const char* filename);
-```
-
-#### 完整示例
-
-参考 `sdk/examples/use_dll.cpp`：
-
-```bash
-# 编译示例
-g++ -std=c++17 sdk/examples/use_dll.cpp -Isdk/include -Lsdk/lib -lsmm -o use_dll.exe
-
-# 运行（确保 smm.dll 在 PATH 中）
-./use_dll.exe
-```
-
-#### 与其他语言的集成
-
-##### Python (使用 ctypes)
-
-```python
-import ctypes
-
-# 加载 DLL
-smm = ctypes.CDLL('smm.dll')
-
-# 定义函数签名
-smm.smm_create_pool.argtypes = [ctypes.c_size_t]
-smm.smm_create_pool.restype = ctypes.c_void_p
-
-# 使用
-pool = smm.smm_create_pool(1024 * 1024 * 1024)
-```
-
-##### C# (P/Invoke)
-
-```csharp
-using System;
-using System.Runtime.InteropServices;
-
-public class SMM {
-    [DllImport("smm.dll", CallingConvention = CallingConvention.Cdecl)]
-    public static extern IntPtr smm_create_pool(ulong pool_size);
-    
-    // 使用
-    IntPtr pool = smm_create_pool(1024 * 1024 * 1024);
-}
-```
-
-#### 注意事项
-
-1. **线程安全**：DLL 内部使用互斥锁，支持多线程调用
-2. **内存管理**：使用完毕后必须调用 `smm_destroy_pool()` 释放资源
-3. **错误处理**：检查返回值，使用 `smm_get_error_string()` 获取错误信息
-4. **持久化**：使用 `smm_save()` 和 `smm_load()` 保存和加载内存池状态
-
-#### 与 TCP 方式的区别
-
-| 特性         | DLL/SDK 方式   | TCP 方式           |
-| ------------ | -------------- | ------------------ |
-| **连接方式** | 本地链接       | 网络连接           |
-| **性能**     | 高（本地调用） | 中等（网络延迟）   |
-| **部署**     | 需要 DLL       | 需要服务器运行     |
-| **适用场景** | 本地应用       | 远程访问、多客户端 |
-
-#### 故障排除
-
-##### DLL 加载失败
-
-- 确保 `smm.dll` 在可执行文件目录或系统 PATH 中
-- 检查 DLL 依赖（使用 Dependency Walker）
-
-##### 链接错误
-
-- 确保包含正确的头文件路径 `-Isdk/include`
-- 确保链接库路径正确 `-Lsdk/lib`
-- Windows 可能需要链接额外的运行时库
-
-##### 运行时错误
-
-- 检查返回值，使用 `smm_get_last_error()` 获取错误码
-- 确保内存池已正确初始化
+Shared Memory Management 系统提供 TCP 客户端 SDK，支持远程客户端通过网络连接到服务器进行操作。
 
 ---
 
-### 方式二：TCP 客户端方式（远程访问）
+## TCP 客户端方式（远程访问）
 
 通过 TCP 连接到服务器进行操作，支持局域网和公网访问。
 
@@ -320,8 +53,8 @@ public class SMM {
 - ✅ **命令行接口**：提供与 server 端相同的命令（alloc, read, update, free, status 等）
 - ✅ **交互式 CLI**：支持交互式命令行界面（类似 server 的 REPL）
 - ✅ **TCP 连接**：通过 TCP 协议连接到服务器
-- ✅ **跨平台**：支持 Windows 和 Linux
-- ✅ **易于集成**：可编译成 DLL（Windows）或共享库（Linux）
+- ✅ **Windows 平台**：支持 Windows 平台
+- ✅ **易于集成**：提供 C++ SDK，支持静态链接
 - ✅ **远程访问**：支持局域网和公网访问
 
 #### 完整流程：从服务器启动到远程客户端连接
@@ -362,8 +95,6 @@ Server is ready for client connections:
     192.168.20.31:8888 (LAN access)
     172.29.56.108:8888 (LAN access)
 
-  Local only:  127.0.0.1:8888 (Local access only)
-
 Note: External clients should use Private IP addresses.
 ========================================
 ```
@@ -371,7 +102,6 @@ Note: External clients should use Private IP addresses.
 **重要提示**：
 - ✅ **使用主网卡 IP**（如 `192.168.20.31`）- 这是外机可以 ping 通的 IP
 - ❌ **不要使用虚拟网卡 IP**（如 `172.29.56.108`）- 外机无法访问
-- ❌ **不要使用 `127.0.0.1`** - 只能本地访问
 
 **步骤 1.3：配置防火墙（服务器端）**
 
@@ -571,7 +301,6 @@ netstat -an | findstr :8888
 
 - ✅ 使用服务器显示的主网卡 IP（外机可以 ping 通的 IP）
 - ❌ 不要使用虚拟网卡 IP
-- ❌ 不要使用 `127.0.0.1`（只能本地访问）
 
 **问题 3：防火墙阻止连接**
 
@@ -719,7 +448,7 @@ cmd /c build_client_cli_static.bat
 #include "client_sdk.h"
 
 int main() {
-    SMMClient::ClientSDK client("127.0.0.1", 8888);
+    SMMClient::ClientSDK client("192.168.1.100", 8888);
     client.StartInteractiveCLI();  // 启动交互式命令行
     return 0;
 }
@@ -736,14 +465,11 @@ client> quit
 **运行编译好的程序**：
 
 ```bash
-# 运行 client.exe（使用默认地址 127.0.0.1:8888）
-.\client.exe
-
-# 或指定服务器地址和端口
-.\client.exe 192.168.1.100 8888
-
-# 运行 client_cli.exe（支持命令行参数）
+# 运行 client_cli.exe（需要指定服务器地址和端口）
 .\examples\client_cli.exe 192.168.1.100 8888
+
+# 或运行 client_static.exe（静态链接版本）
+.\client_static.exe 192.168.1.100 8888
 ```
 
 **方式二：编程接口**：
@@ -753,7 +479,7 @@ client> quit
 #include <iostream>
 
 int main() {
-    SMMClient::ClientSDK client("127.0.0.1", 8888);
+    SMMClient::ClientSDK client("192.168.1.100", 8888);
     
     if (!client.Connect()) {
         std::cerr << "Failed to connect\n";
@@ -780,10 +506,10 @@ int main() {
 **构造函数**：
 
 ```cpp
-ClientSDK(const std::string& host = "127.0.0.1", uint16_t port = 8888);
+ClientSDK(const std::string& host, uint16_t port = 8888);
 ```
 
-创建客户端 SDK 实例。
+创建客户端 SDK 实例。`host` 参数指定服务器 IP 地址（如 `"192.168.1.100"`）。
 
 **连接管理**：
 
@@ -831,8 +557,8 @@ void StartInteractiveCLI(const std::string& prompt = "client> ");
 # 编译
 g++ -std=c++17 examples/client_cli.cpp -Iinclude -Llib -lsmm_client -o client_cli -lws2_32
 
-# 运行
-./client_cli 127.0.0.1 8888
+# 运行（指定服务器 IP 地址）
+./client_cli 192.168.1.100 8888
 ```
 
 **示例 2：集成到自己的程序**：
@@ -982,7 +708,6 @@ dir client_cli_static.exe
 
 - 确保包含正确的头文件路径
 - Windows 需要链接 `ws2_32.lib`
-- Linux 需要安装开发工具链
 
 ---
 
@@ -991,20 +716,15 @@ dir client_cli_static.exe
 ```
 sdk/
 ├── include/          # 头文件
-│   └── client_sdk.h # 客户端 SDK 头文件（TCP 方式）
-├── lib/              # 库文件（DLL 和导入库）
-│   ├── smm.dll       # Server 核心 DLL（DLL 方式）
-│   ├── smm.lib       # 导入库（DLL 方式）
-│   └── libsmm_client.a # 客户端静态库（TCP 方式）
+│   └── client_sdk.h # 客户端 SDK 头文件
+├── lib/              # 库文件
+│   └── libsmm_client.a # 客户端静态库
 ├── docs/             # 文档
 ├── src/              # 源代码
-│   └── client_sdk.cpp # 客户端 SDK 实现（TCP 方式）
+│   └── client_sdk.cpp # 客户端 SDK 实现
 └── examples/         # 示例代码
-    ├── basic_usage.cpp    # C API 基础使用示例（DLL 方式）
-    ├── client_cli.cpp     # 客户端命令行工具示例（TCP 方式）
-    └── use_dll.cpp        # DLL 使用示例（DLL 方式）
+    └── client_cli.cpp # 客户端命令行工具示例
 ```
 
 **注意**：
-- DLL 方式的头文件在 `core/api/smm_api.h`
-- TCP 方式的头文件在 `sdk/include/client_sdk.h`
+- 客户端 SDK 头文件在 `sdk/include/client_sdk.h`

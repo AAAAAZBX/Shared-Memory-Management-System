@@ -176,9 +176,20 @@ bool ClientSDK::ExecuteCommandWithOutput(const std::string& command, std::string
         std::string data = description + '\0' + content;
         std::string response;
         if (SendRequest(static_cast<uint8_t>(CommandType::ALLOC), data, response)) {
-            std::cout << response << "\n";
+            std::cout << response;
+            if (!response.empty() && response.back() != '\n') {
+                std::cout << "\n";
+            }
             output = response;
             return true;
+        } else {
+            // 输出错误信息（服务器返回的）
+            if (!response.empty()) {
+                std::cout << response;
+                if (response.back() != '\n') {
+                    std::cout << "\n";
+                }
+            }
         }
     } else if (cmd == "read") {
         if (tokens.size() < 2) {
@@ -187,9 +198,19 @@ bool ClientSDK::ExecuteCommandWithOutput(const std::string& command, std::string
         }
         std::string response;
         if (SendRequest(static_cast<uint8_t>(CommandType::READ), tokens[1], response)) {
-            std::cout << response << "\n";
+            std::cout << response;
+            if (!response.empty() && response.back() != '\n') {
+                std::cout << "\n";
+            }
             output = response;
             return true;
+        } else {
+            if (!response.empty()) {
+                std::cout << response;
+                if (response.back() != '\n') {
+                    std::cout << "\n";
+                }
+            }
         }
     } else if (cmd == "update") {
         if (tokens.size() < 3) {
@@ -203,9 +224,19 @@ bool ClientSDK::ExecuteCommandWithOutput(const std::string& command, std::string
         std::string data = tokens[1] + '\0' + content;
         std::string response;
         if (SendRequest(static_cast<uint8_t>(CommandType::UPDATE), data, response)) {
-            std::cout << response << "\n";
+            std::cout << response;
+            if (!response.empty() && response.back() != '\n') {
+                std::cout << "\n";
+            }
             output = response;
             return true;
+        } else {
+            if (!response.empty()) {
+                std::cout << response;
+                if (response.back() != '\n') {
+                    std::cout << "\n";
+                }
+            }
         }
     } else if (cmd == "free" || cmd == "delete") {
         if (tokens.size() < 2) {
@@ -214,17 +245,37 @@ bool ClientSDK::ExecuteCommandWithOutput(const std::string& command, std::string
         }
         std::string response;
         if (SendRequest(static_cast<uint8_t>(CommandType::CMD_DELETE), tokens[1], response)) {
-            std::cout << response << "\n";
+            std::cout << response;
+            if (!response.empty() && response.back() != '\n') {
+                std::cout << "\n";
+            }
             output = response;
             return true;
+        } else {
+            if (!response.empty()) {
+                std::cout << response;
+                if (response.back() != '\n') {
+                    std::cout << "\n";
+                }
+            }
         }
     } else if (cmd == "status") {
-        std::string mode = tokens.size() > 1 ? tokens[1] : "";
+        std::string mode = tokens.size() > 1 ? tokens[1] : "--memory";
         std::string response;
         if (SendRequest(static_cast<uint8_t>(CommandType::STATUS), mode, response)) {
-            std::cout << response << "\n";
+            std::cout << response;
+            if (!response.empty() && response.back() != '\n') {
+                std::cout << "\n";
+            }
             output = response;
             return true;
+        } else {
+            if (!response.empty()) {
+                std::cout << response;
+                if (response.back() != '\n') {
+                    std::cout << "\n";
+                }
+            }
         }
     } else if (cmd == "quit" || cmd == "exit") {
         return false; // 退出信号
@@ -309,7 +360,6 @@ bool ClientSDK::ReceiveResponse(std::string& response) {
     while (received < 5) {
         int n = recv(sock, reinterpret_cast<char*>(header + received), 5 - received, 0);
         if (n <= 0) {
-            std::cerr << "Failed to receive response header\n";
             return false;
         }
         received += n;
@@ -321,7 +371,6 @@ bool ClientSDK::ReceiveResponse(std::string& response) {
     uint32_t data_len = ntohl(net_len);
 
     if (data_len > 1024 * 1024) { // 最大1MB
-        std::cerr << "Response too large\n";
         return false;
     }
 
@@ -331,7 +380,6 @@ bool ClientSDK::ReceiveResponse(std::string& response) {
     while (received < static_cast<int>(data_len)) {
         int n = recv(sock, buffer.data() + received, data_len - received, 0);
         if (n <= 0) {
-            std::cerr << "Failed to receive response data\n";
             return false;
         }
         received += n;
@@ -339,11 +387,8 @@ bool ClientSDK::ReceiveResponse(std::string& response) {
 
     response.assign(buffer.data(), data_len);
 
-    if (code != ResponseCode::SUCCESS) {
-        std::cerr << "Error [" << static_cast<int>(code) << "]: " << response << "\n";
-        return false;
-    }
-
+    // 无论成功还是失败，都返回 true，让调用者处理响应内容
+    // 这样服务器返回的错误信息也能被正确输出
     return true;
 }
 

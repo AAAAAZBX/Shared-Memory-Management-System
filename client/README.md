@@ -166,7 +166,7 @@ int sock = socket(AF_INET, SOCK_STREAM, 0);
 struct sockaddr_in addr;
 addr.sin_family = AF_INET;
 addr.sin_port = htons(8888);
-inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
+inet_pton(AF_INET, "192.168.1.100", &addr.sin_addr);  // 使用服务器 IP 地址
 connect(sock, (struct sockaddr*)&addr, sizeof(addr));
 
 // 发送请求
@@ -202,7 +202,7 @@ import struct
 
 # 连接服务器
 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-sock.connect(("127.0.0.1", 8888))
+sock.connect(("192.168.1.100", 8888))  # 使用服务器 IP 地址
 
 # 发送请求
 cmd = 0x04  # READ
@@ -234,7 +234,7 @@ import java.net.Socket;
 import java.io.*;
 
 // 连接服务器
-Socket socket = new Socket("127.0.0.1", 8888);
+Socket socket = new Socket("192.168.1.100", 8888);  // 使用服务器 IP 地址
 DataOutputStream out = new DataOutputStream(socket.getOutputStream());
 DataInputStream in = new DataInputStream(socket.getInputStream());
 
@@ -269,7 +269,7 @@ import (
 )
 
 // 连接服务器
-conn, _ := net.Dial("tcp", "127.0.0.1:8888")
+conn, _ := net.Dial("tcp", "192.168.1.100:8888")  // 使用服务器 IP 地址
 defer conn.Close()
 
 // 发送请求
@@ -441,7 +441,6 @@ conn.Read(response)
    - 或者在服务器电脑上临时关闭防火墙测试
 
 4. **网络连接问题**
-   - **本地连接（127.0.0.1）**：只能在同一台电脑上访问
    - **局域网连接（192.168.x.x 或 172.x.x.x）**：需要客户端和服务器在同一局域网
    - **公网连接**：需要服务器有公网 IP，并配置路由器端口转发
 
@@ -468,7 +467,7 @@ conn.Read(response)
 - IP 地址错误
 
 **解决方案：**
-1. 在服务器电脑上测试：`telnet 127.0.0.1 8888` 或使用本地客户端
+1. 在服务器电脑上测试：使用服务器 IP 地址进行连接测试
 2. 检查服务器日志，确认是否有错误信息
 3. 尝试使用服务器的其他 IP 地址（如果有多个网卡）
 

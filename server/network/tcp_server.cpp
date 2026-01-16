@@ -4,10 +4,76 @@
 #include <sstream>
 #include <cstring>
 #include <algorithm>
+#include <iomanip>
+#include <vector>
 
 typedef int socklen_t;
 #define close closesocket
 #define SHUT_RDWR SD_BOTH
+
+// 格式化辅助函数（与 commands.cpp 保持一致）
+static size_t GetDisplayWidth(const std::string& str) {
+    size_t width = 0;
+    for (size_t i = 0; i < str.length();) {
+        unsigned char c = static_cast<unsigned char>(str[i]);
+        if (c < 0x80) {
+            width += 1;
+            i += 1;
+        } else if ((c & 0xE0) == 0xC0) {
+            width += 2;
+            i += 2;
+        } else if ((c & 0xF0) == 0xE0) {
+            width += 2;
+            i += 3;
+        } else if ((c & 0xF8) == 0xF0) {
+            width += 2;
+            i += 4;
+        } else {
+            i += 1;
+        }
+    }
+    return width;
+}
+
+static std::string PadToDisplayWidth(const std::string& str, size_t targetWidth) {
+    size_t currentWidth = GetDisplayWidth(str);
+    if (currentWidth >= targetWidth) {
+        return str;
+    }
+    return str + std::string(targetWidth - currentWidth, ' ');
+}
+
+static std::string TruncateToDisplayWidth(const std::string& str, size_t targetWidth) {
+    if (GetDisplayWidth(str) <= targetWidth) {
+        return str;
+    }
+    size_t currentWidth = 0;
+    size_t i = 0;
+    while (i < str.length() && currentWidth + 3 <= targetWidth) {
+        unsigned char c = static_cast<unsigned char>(str[i]);
+        size_t charWidth = 1;
+        size_t charLen = 1;
+        if (c < 0x80) {
+            charWidth = 1;
+            charLen = 1;
+        } else if ((c & 0xE0) == 0xC0) {
+            charWidth = 2;
+            charLen = 2;
+        } else if ((c & 0xF0) == 0xE0) {
+            charWidth = 2;
+            charLen = 3;
+        } else if ((c & 0xF8) == 0xF0) {
+            charWidth = 2;
+            charLen = 4;
+        }
+        if (currentWidth + charWidth + 3 > targetWidth) {
+            break;
+        }
+        currentWidth += charWidth;
+        i += charLen;
+    }
+    return str.substr(0, i) + "...";
+}
 
 TCPServer::TCPServer(SharedMemoryPool& smp, uint16_t port)
     : smp_(smp), port_(port), listenSocket_(INVALID_SOCKET), running_(false) {
@@ -235,9 +301,13 @@ void TCPServer::ProcessRequest(SOCKET clientSocket, const Protocol::Request& req
                 smp_.AllocateBlock(memory_id, description, content.data(), content.size());
             if (blockID < 0) {
                 resp.code = Protocol::ResponseCode::ERROR_NO_MEMORY;
-                resp.data = "Memory allocation failed";
+                resp.data = "Allocation failed. Insufficient memory or invalid parameters.\n";
             } else {
-                resp.data = memory_id; // 返回 Memory ID
+                std::ostringstream oss;
+                oss << "Allocation successful. Memory ID: " << memory_id << "\n";
+                oss << "Description: " << description << "\n";
+                oss << "Content stored at block " << blockID << "\n";
+                resp.data = oss.str();
             }
             break;
         }
@@ -264,25 +334,42 @@ void TCPServer::ProcessRequest(SOCKET clientSocket, const Protocol::Request& req
             const auto& memoryInfo = smp_.GetMemoryInfo();
             if (memoryInfo.find(memory_id) == memoryInfo.end()) {
                 resp.code = Protocol::ResponseCode::ERROR_NOT_FOUND;
-                resp.data = "Memory ID not found: " + memory_id;
+                resp.data = "Error: Memory ID '" + memory_id +
+                            "' not found.\nUse 'alloc' command to allocate memory first.\n";
                 break;
             }
 
-            // 获取当前描述
-            const auto& meta = smp_.GetMeta(memoryInfo.at(memory_id).first);
+            // 获取当前描述和块信息（在释放前保存）
+            auto it = memoryInfo.find(memory_id);
+            size_t startBlock = it->second.first;
+            size_t currentBlockCount = it->second.second;
+            size_t currentSize = currentBlockCount * SharedMemoryPool::kBlockSize;
+            const auto& meta = smp_.GetMeta(startBlock);
             std::string description = meta.description;
 
             // 释放旧内存
             smp_.FreeByMemoryId(memory_id);
+
+            // 计算新内容需要的块数
+            size_t newSize = newContent.size();
+            size_t requiredBlockCount =
+                (newSize + SharedMemoryPool::kBlockSize - 1) / SharedMemoryPool::kBlockSize;
 
             // 分配新内存
             int blockID =
                 smp_.AllocateBlock(memory_id, description, newContent.data(), newContent.size());
             if (blockID < 0) {
                 resp.code = Protocol::ResponseCode::ERROR_NO_MEMORY;
-                resp.data = "Memory allocation failed";
+                resp.data = "Update failed. Insufficient memory for new content.\n";
             } else {
-                resp.data = "Updated: " + memory_id;
+                std::ostringstream oss;
+                if (newSize > currentSize) {
+                    oss << "Content updated successfully. New content stored at block " << blockID
+                        << "\n";
+                } else {
+                    oss << "Content updated successfully.\n";
+                }
+                resp.data = oss.str();
             }
             break;
         }
@@ -298,9 +385,9 @@ void TCPServer::ProcessRequest(SOCKET clientSocket, const Protocol::Request& req
             std::string memory_id = req.data;
             if (!smp_.FreeByMemoryId(memory_id)) {
                 resp.code = Protocol::ResponseCode::ERROR_NOT_FOUND;
-                resp.data = "Memory ID not found: " + memory_id;
+                resp.data = "Memory ID '" + memory_id + "' not found.\n";
             } else {
-                resp.data = "Memory freed: " + memory_id;
+                resp.data = "Memory freed successfully for '" + memory_id + "'\n";
             }
             break;
         }
@@ -317,19 +404,28 @@ void TCPServer::ProcessRequest(SOCKET clientSocket, const Protocol::Request& req
             std::string content = smp_.GetMemoryContentAsString(memory_id);
             if (content.empty()) {
                 resp.code = Protocol::ResponseCode::ERROR_NOT_FOUND;
-                resp.data = "Memory ID not found or content is empty: " + memory_id;
+                resp.data = "Memory ID '" + memory_id + "' not found or content is empty.\n";
             } else {
-                // 返回格式化的内容信息
+                // 返回格式化的内容信息（与 commands.cpp 格式一致）
                 const auto& memoryInfo = smp_.GetMemoryInfo();
                 auto it = memoryInfo.find(memory_id);
                 if (it != memoryInfo.end()) {
-                    const auto& meta = smp_.GetMeta(it->second.first);
+                    size_t startBlock = it->second.first;
+                    size_t blockCount = it->second.second;
+                    const auto& meta = smp_.GetMeta(startBlock);
                     std::ostringstream oss;
                     oss << "Memory ID: " << memory_id << "\n";
                     oss << "Description: " << meta.description << "\n";
-                    oss << "Content: " << content << "\n";
+                    oss << "Blocks: " << startBlock << "-" << (startBlock + blockCount - 1) << "\n";
+                    oss << "----------------------------------------\n";
+                    oss << content;
+                    if (!content.empty() && content.back() != '\n') {
+                        oss << "\n";
+                    }
+                    oss << "----------------------------------------\n";
                     oss << "Size: " << content.size() << " bytes\n";
-                    oss << "Last Modified: " << smp_.GetMemoryLastModifiedTimeString(memory_id);
+                    oss << "Last Modified: " << smp_.GetMemoryLastModifiedTimeString(memory_id)
+                        << "\n";
                     resp.data = oss.str();
                 } else {
                     resp.data = content;
@@ -339,23 +435,68 @@ void TCPServer::ProcessRequest(SOCKET clientSocket, const Protocol::Request& req
         }
 
         case Protocol::CommandType::STATUS: {
-            // 返回所有内存块的状态信息
+            // 返回所有内存块的状态信息（与 commands.cpp 格式一致）
             const auto& memoryInfo = smp_.GetMemoryInfo();
             if (memoryInfo.empty()) {
-                resp.data = "No allocated memory blocks";
+                resp.data =
+                    "Memory Pool Status:\n|    MemoryID    |    Description    |      Bytes      | "
+                    "                range                    |    Last Modified    "
+                    "|\n|----------------|-------------------|-----------------|-------------------"
+                    "--------------------------|---------------------|\n";
             } else {
                 std::ostringstream oss;
                 oss << "Memory Pool Status:\n";
-                oss << "Total blocks: " << memoryInfo.size() << "\n\n";
+                oss << "|    MemoryID    |    Description    |      Bytes      |                 "
+                       "range                    |    Last Modified    |\n";
+                oss << "|----------------|-------------------|-----------------|-------------------"
+                       "--------------------------|---------------------|\n";
 
+                // 使用指针避免复制数据，按起始 block 排序
+                std::vector<const std::pair<const std::string, std::pair<size_t, size_t>>*>
+                    sortedEntries;
+                sortedEntries.reserve(memoryInfo.size());
                 for (const auto& entry : memoryInfo) {
-                    const auto& meta = smp_.GetMeta(entry.second.first);
-                    oss << "Memory ID: " << entry.first << "\n";
-                    oss << "  Description: " << meta.description << "\n";
-                    oss << "  Blocks: " << entry.second.first << " - "
-                        << (entry.second.first + entry.second.second - 1) << "\n";
-                    oss << "  Last Modified: " << smp_.GetMemoryLastModifiedTimeString(entry.first)
-                        << "\n\n";
+                    sortedEntries.push_back(&entry);
+                }
+                std::sort(
+                    sortedEntries.begin(), sortedEntries.end(),
+                    [](const auto* a, const auto* b) { return a->second.first < b->second.first; });
+
+                for (const auto* entry : sortedEntries) {
+                    size_t blockCount = entry->second.second;
+                    size_t totalBytes = blockCount * SharedMemoryPool::kBlockSize;
+                    size_t totalKB = totalBytes / 1024;
+
+                    std::ostringstream rangeStream;
+                    rangeStream << "block_" << std::setfill('0') << std::setw(3)
+                                << entry->second.first << " - "
+                                << "block_" << std::setfill('0') << std::setw(3)
+                                << (entry->second.first + entry->second.second - 1) << "("
+                                << blockCount << " blocks, " << totalKB << "KB)";
+                    std::string rangeStr = rangeStream.str();
+                    const auto& meta = smp_.GetMeta(entry->second.first);
+                    std::string description = meta.description.empty() ? "-" : meta.description;
+
+                    // 计算实际字节数（通过读取内容）
+                    std::string content = smp_.GetMemoryContentAsString(entry->first);
+                    size_t bytes = content.size();
+
+                    // 格式化字节数
+                    std::ostringstream bytesStream;
+                    bytesStream << bytes;
+                    std::string bytesStr = bytesStream.str();
+
+                    // 使用显示宽度进行截断和填充（支持中文）
+                    std::string memoryId = PadToDisplayWidth(entry->first, 14);
+                    description = TruncateToDisplayWidth(description, 17);
+                    description = PadToDisplayWidth(description, 17);
+                    std::string bytesFormatted = PadToDisplayWidth(bytesStr, 15);
+                    std::string range = PadToDisplayWidth(rangeStr, 44);
+                    std::string lastModified =
+                        PadToDisplayWidth(smp_.GetMemoryLastModifiedTimeString(entry->first), 19);
+
+                    oss << "| " << memoryId << " | " << description << " | " << bytesFormatted
+                        << " | " << range << " | " << lastModified << " |\n";
                 }
                 resp.data = oss.str();
             }

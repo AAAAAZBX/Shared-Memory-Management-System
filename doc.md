@@ -88,24 +88,23 @@
 #### 项目状态
 
 - ✅ **已完成**：内存池核心、内存增删查改、内存紧凑、状态查询、命令处理、数据持久化、文件上传功能、UTF-8 中文支持、表格显示优化、内存池扩展（1GB）
-- 🔄 **进行中**：TCP 服务器（60%）、客户端接口规范（60%）
-- ⏳ **计划中**：紧凑算法优化、SDK/DLL 打包
+- ✅ **已完成**：TCP 服务器、客户端接口规范
+- ⏳ **计划中**：紧凑算法优化
 
 ### 0.2 目录结构
 
 ```
 Shared-Memory-Manager/
-├── core/                           # 核心库（可编译成 DLL）
+├── core/                           # 核心库
 │   ├── shared_memory_pool/        # 内存池核心模块
 │   │   ├── shared_memory_pool.h   # 内存池类声明
 │   │   └── shared_memory_pool.cpp # 内存池类实现
 │   ├── persistence/                # 持久化模块
 │   │   ├── persistence.h          # 持久化接口声明
 │   │   └── persistence.cpp         # 持久化实现
-│   ├── api/                        # C API 包装层
-│   │   ├── smm_api.h              # C API 头文件
-│   │   └── smm_api.cpp            # C API 实现
-│   └── build_dll.bat              # DLL 编译脚本
+│   └── api/                        # C API 包装层
+│       ├── smm_api.h              # C API 头文件
+│       └── smm_api.cpp            # C API 实现
 ├── server/                         # 服务器端程序（使用 core/）
 │   ├── main.cpp                   # 服务器主程序入口
 │   ├── command/                    # 命令处理模块
@@ -125,9 +124,7 @@ Shared-Memory-Manager/
 │   ├── src/                       # 源代码目录
 │   │   └── client_sdk.cpp        # C++ 客户端 SDK 实现
 │   ├── examples/                  # 示例代码目录
-│   │   ├── basic_usage.cpp       # C API 基础使用示例
-│   │   ├── client_cli.cpp        # C++ 客户端 CLI 示例
-│   │   └── use_dll.cpp           # DLL 直接使用示例
+│   │   └── client_cli.cpp        # C++ 客户端 CLI 示例
 │   ├── lib/                       # 库文件目录
 │   ├── docs/                      # 文档目录
 │   ├── build.bat                  # SDK 编译脚本
@@ -141,7 +138,6 @@ Shared-Memory-Manager/
 │   └── 测试中文.txt               # 中文测试文件
 ├── README.md                       # 项目说明文档（面向用户）
 ├── doc.md                          # 技术文档（面向开发者，本文件）
-├── DLL_SDK_GUIDE.md               # DLL/SDK 打包指南
 ├── JAVA_GC_REFERENCE.md           # Java GC 原理参考
 ├── example.txt                     # 示例文件
 └── problem.txt                     # 问题记录
@@ -154,7 +150,6 @@ Shared-Memory-Manager/
 - **`main.cpp`**：程序入口，初始化内存池，启动 REPL 循环，处理信号
 - **`core/shared_memory_pool/`**：内存池核心，管理 1GB 内存空间，提供分配/释放/紧凑功能
 - **`core/persistence/`**：持久化，保存/加载内存池状态到文件
-- **`core/api/`**：C API 包装层，提供跨语言的 C 接口
 - **`server/command/`**：命令处理，解析用户命令，调用内存池接口
 - **`server/network/`**：网络模块，TCP 服务器实现，支持多客户端并发连接
 - **`client/`**：客户端实现指南和参考实现
@@ -431,7 +426,7 @@ struct FileHeader {
 - ✅ 网络协议完整实现（`protocol.h/cpp`）
 - ✅ 已更新为 Memory ID 系统
 - ✅ 已集成到主程序（`main.cpp`）
-- ✅ 支持 Windows 平台（已移除 Linux/Unix 相关代码）
+- ✅ 支持 Windows 平台
 
 #### 客户端实现指南 ✅
 
@@ -776,7 +771,4 @@ A: 需要为 `SharedMemoryPool` 的操作添加互斥锁（`std::mutex`），确
 **未来开发计划**：
 1. ✅ **内存池扩展**：已完成，当前支持 1GB 内存池（已修复栈溢出问题）
 2. ⏳ **紧凑算法优化**：改进内存紧凑算法，减少拷贝次数，提高效率
-3. ⏳ **SDK/DLL 打包**：将核心功能打包为 DLL，提供 C/C++ SDK 接口
-4. ⚠️ **TCP 连接修复**：修复 TCP 连接功能存在的问题
-5. ⏳ **客户端文件上传**：支持客户端通过 TCP 上传文件到内存池（服务器端文件上传功能已完成）
-6. ⏳ **性能优化**：优化大内存池的分配和释放性能
+3. ⏳ **性能优化**：优化大内存池的分配和释放性能

@@ -1,5 +1,6 @@
 # 编译生成的文件
 *.exe
+!*_static.exe
 *.o
 *.obj
 *.dll
@@ -19,6 +20,7 @@ obj/
 # IDE 文件
 .vscode/
 .idea/
+.clang-format
 *.swp
 *.swo
 *~
