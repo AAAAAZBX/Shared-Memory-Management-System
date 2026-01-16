@@ -407,7 +407,6 @@ struct FileHeader {
   - `DELETE (0x03)`: 删除内存，数据格式为 `memory_id`
   - `READ (0x04)`: 读取内容，数据格式为 `memory_id`，返回格式化的内存信息
   - `STATUS (0x05)`: 查询状态，无数据，返回所有内存块的状态信息
-  - `PING (0x06)`: 心跳检测，无数据，返回 "PONG"
 - **状态码**：
   - `SUCCESS (0x00)`: 成功
   - `ERROR_INVALID_CMD (0x01)`: 无效命令

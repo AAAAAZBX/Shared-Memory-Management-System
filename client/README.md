@@ -49,7 +49,6 @@
 | `DELETE` | 0x03 | `memory_id`              | 删除/释放内存            |
 | `READ`   | 0x04 | `memory_id`              | 读取内存内容             |
 | `STATUS` | 0x05 | 无（空字符串）           | 查询所有内存块状态       |
-| `PING`   | 0x06 | 无（空字符串）           | 心跳检测                 |
 
 ### 状态码定义
 
@@ -102,7 +101,7 @@ connect(socket, server_address, port);
 例如: "memory_00001"
 ```
 
-**STATUS/PING 命令：**
+**STATUS 命令：**
 ```
 数据 = "" (空字符串，长度为0)
 ```
@@ -363,20 +362,6 @@ conn.Read(response)
 数据: "Memory Pool Status:\nTotal blocks: 2\n\nMemory ID: memory_00001\n  Description: My Data\n  Blocks: 0 - 0\n  Last Modified: 2024-01-15 10:30:45\n\n..."
 ```
 
-### 6. 心跳检测（PING）
-
-**请求：**
-```
-命令: 0x06
-数据: "" (空)
-```
-
-**响应（成功）：**
-```
-状态码: 0x00
-数据: "PONG"
-```
-
 ## 错误处理
 
 ### 常见错误
@@ -429,7 +414,7 @@ conn.Read(response)
 
 ## 测试建议
 
-1. **连接测试**：先使用 PING 命令测试连接
+1. **连接测试**：先使用 STATUS 命令测试连接
 2. **基本操作**：按顺序测试 ALLOC → READ → UPDATE → READ → DELETE
 3. **错误处理**：测试各种错误情况（无效参数、不存在的 ID 等）
 4. **并发测试**：多个客户端同时连接和操作

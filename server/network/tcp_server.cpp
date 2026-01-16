@@ -362,11 +362,6 @@ void TCPServer::ProcessRequest(SOCKET clientSocket, const Protocol::Request& req
             break;
         }
 
-        case Protocol::CommandType::PING: {
-            resp.data = "PONG";
-            break;
-        }
-
         default:
             resp.code = Protocol::ResponseCode::ERROR_INVALID_CMD;
             resp.data = "Unknown command";

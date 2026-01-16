@@ -6,37 +6,36 @@
 namespace Protocol {
 // 命令类型定义
 enum class CommandType : uint8_t {
-    ALLOC = 0x01,   // 分配内存
-    UPDATE = 0x02,  // 更新内容
-    DELETE = 0x03,  // 删除/释放内存
-    READ = 0x04,    // 读取内容
-    STATUS = 0x05,  // 查询状态
-    PING = 0x06     // 心跳检测
+    ALLOC = 0x01,  // 分配内存
+    UPDATE = 0x02, // 更新内容
+    DELETE = 0x03, // 删除/释放内存
+    READ = 0x04,   // 读取内容
+    STATUS = 0x05  // 查询状态
 };
 
 // 响应状态码
 enum class ResponseCode : uint8_t {
-    SUCCESS = 0x00,        // 成功
-    ERROR_INVALID_CMD = 0x01,  // 无效命令
-    ERROR_INVALID_PARAM = 0x02, // 无效参数
-    ERROR_NO_MEMORY = 0x03,     // 内存不足
-    ERROR_NOT_FOUND = 0x04,     // 用户不存在
+    SUCCESS = 0x00,              // 成功
+    ERROR_INVALID_CMD = 0x01,    // 无效命令
+    ERROR_INVALID_PARAM = 0x02,  // 无效参数
+    ERROR_NO_MEMORY = 0x03,      // 内存不足
+    ERROR_NOT_FOUND = 0x04,      // 用户不存在
     ERROR_ALREADY_EXISTS = 0x05, // 用户已存在
     ERROR_INTERNAL = 0xFF        // 内部错误
 };
 
 // 请求包结构
 struct Request {
-    CommandType cmd;      // 命令类型（1字节）
-    uint32_t dataLen;     // 数据长度（4字节，大端序）
-    std::string data;     // 数据内容（N字节）
+    CommandType cmd;  // 命令类型（1字节）
+    uint32_t dataLen; // 数据长度（4字节，大端序）
+    std::string data; // 数据内容（N字节）
 };
 
 // 响应包结构
 struct Response {
-    ResponseCode code;     // 状态码（1字节）
-    uint32_t dataLen;     // 数据长度（4字节，大端序）
-    std::string data;     // 响应数据（N字节）
+    ResponseCode code; // 状态码（1字节）
+    uint32_t dataLen;  // 数据长度（4字节，大端序）
+    std::string data;  // 响应数据（N字节）
 };
 
 // 序列化请求到字节流

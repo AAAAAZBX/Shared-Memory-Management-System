@@ -18,7 +18,6 @@ class CommandType(IntEnum):
     DELETE = 0x03  # 删除/释放内存
     READ = 0x04    # 读取内容
     STATUS = 0x05  # 查询状态
-    PING = 0x06    # 心跳检测
 
 
 class ResponseCode(IntEnum):
@@ -236,24 +235,6 @@ class MemoryClient:
             print(f"Status query failed [{code.name}]: {error_msg}")
             return None
     
-    def ping(self) -> bool:
-        """
-        心跳检测
-        
-        Returns:
-            bool: 是否成功
-        """
-        code, response = self._send_request(CommandType.PING)
-        
-        if code == ResponseCode.SUCCESS:
-            result = response.decode('utf-8', errors='ignore')
-            print(f"Ping successful: {result}")
-            return True
-        else:
-            error_msg = response.decode('utf-8', errors='ignore')
-            print(f"Ping failed [{code.name}]: {error_msg}")
-            return False
-    
     def __enter__(self):
         """上下文管理器入口"""
         if not self.connect():
@@ -271,11 +252,6 @@ def main():
     # 注意：如果服务器未运行，会抛出异常
     try:
         with MemoryClient("192.168.20.39", 8888) as client:
-            # 心跳检测
-            print("=" * 50)
-            print("Testing PING...")
-            client.ping()
-            
             # 分配内存
             print("\n" + "=" * 50)
             print("Testing ALLOC...")
@@ -318,7 +294,6 @@ def main():
     # client = MemoryClient("127.0.0.1", 8888)
     # if client.connect():
     #     try:
-    #         client.ping()
     #         memory_id = client.alloc("My Data", "Test content")
     #         if memory_id:
     #             client.read(memory_id)
