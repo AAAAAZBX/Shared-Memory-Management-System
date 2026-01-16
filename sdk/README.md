@@ -398,6 +398,11 @@ cmd /c build_client_static.bat
 
 然后将 `client_cli_static.exe` 或 `client_static.exe` 复制到客户端机器即可运行，**无需安装任何开发工具或 DLL**。
 
+**重要提示**：
+- ✅ 静态链接版本（`*_static.exe`）是独立可执行文件，不依赖任何 DLL
+- ❌ 动态链接版本（`*.exe`）需要 MinGW 运行时 DLL（`libgcc_s_seh-1.dll`, `libstdc++-6.dll` 等）
+- ⚠️ 如果通过 Git 复制代码，`.gitignore` 会忽略编译文件（`*.exe`, `*.dll`），需要在服务器端编译后再复制
+
 **方式 B：在客户端机器编译（需要开发环境）**
 
 在客户端机器上（需要安装 MinGW-w64）：
@@ -892,6 +897,113 @@ void MyApplication() {
 4. **线程安全**：每个 ClientSDK 实例不是线程安全的，多线程使用需要加锁
 
 #### 故障排除
+
+##### 问题：客户端显示 "Please install MSYS2/MinGW-w64"
+
+**问题原因**：
+
+1. **动态链接版本需要运行时 DLL**：
+   - `client_cli.exe` 和 `client.exe` 是动态链接版本
+   - 需要 MinGW 运行时 DLL：`libgcc_s_seh-1.dll`, `libstdc++-6.dll` 等
+   - 这些 DLL 不在客户端机器上，导致运行时错误
+
+2. **.gitignore 忽略了编译文件**：
+   - `.gitignore` 中忽略了 `*.exe`, `*.dll`, `*.a`, `*.lib`
+   - 如果通过 Git 复制代码，编译生成的文件不会存在
+
+**解决方案**：
+
+**方案一：使用静态链接版本（推荐）✅**
+
+在服务器端（有开发环境的机器）编译静态链接版本：
+
+```bash
+cd sdk
+
+# 编译静态链接版本（独立可执行文件）
+cmd /c build_client_cli_static.bat
+# 输出：examples/client_cli_static.exe
+
+# 或编译简单客户端
+cmd /c build_client_static.bat
+# 输出：client_static.exe
+```
+
+部署到客户端：
+1. 将 `client_cli_static.exe` 或 `client_static.exe` 复制到客户端机器
+2. 客户端直接运行，**无需任何 DLL 或开发工具**
+
+```bash
+# 在客户端机器上运行
+.\client_cli_static.exe 192.168.1.100 8888
+```
+
+**方案二：复制运行时 DLL（不推荐）**
+
+如果必须使用动态链接版本，需要复制以下文件到客户端：
+
+1. **可执行文件**：
+   - `examples/client_cli.exe` 或 `client.exe`
+
+2. **MinGW 运行时 DLL**（从 MinGW 安装目录的 `bin` 文件夹复制）：
+   - `libgcc_s_seh-1.dll`（或 `libgcc_s_dw2-1.dll`，取决于 MinGW 版本）
+   - `libstdc++-6.dll`
+   - `libwinpthread-1.dll`（如果使用 pthread）
+
+3. **客户端 SDK DLL**（如果使用 DLL 版本）：
+   - `lib/smm_client.dll`
+
+**查找 MinGW DLL 的位置**：
+
+```bash
+# 在服务器端（有 MinGW 的机器）
+where g++
+# 输出类似：D:\software\msys2\ucrt64\bin\g++.exe
+
+# DLL 在同一个 bin 目录中
+# 复制以下文件到客户端（与 exe 同一目录）：
+# D:\software\msys2\ucrt64\bin\libgcc_s_seh-1.dll
+# D:\software\msys2\ucrt64\bin\libstdc++-6.dll
+# D:\software\msys2\ucrt64\bin\libwinpthread-1.dll
+```
+
+**推荐工作流程**：
+
+**服务器端（开发机器）**：
+```bash
+# 1. 编译静态链接版本
+cd sdk
+cmd /c build_client_cli_static.bat
+
+# 2. 将编译好的文件复制到客户端
+# 只需复制：examples/client_cli_static.exe
+```
+
+**客户端（目标机器）**：
+```bash
+# 直接运行，无需任何依赖
+.\client_cli_static.exe 192.168.1.100 8888
+```
+
+**验证部署**：
+
+在客户端机器上运行：
+```bash
+# 检查文件是否存在
+dir client_cli_static.exe
+
+# 运行程序
+.\client_cli_static.exe 192.168.1.100 8888
+```
+
+如果仍然提示需要 MinGW，检查：
+1. 是否使用了静态链接版本（`*_static.exe`）
+2. 文件是否完整复制
+3. 是否有其他依赖问题
+
+**总结**：
+- ✅ **推荐**：使用静态链接版本（`*_static.exe`），只需复制一个文件
+- ❌ **不推荐**：使用动态链接版本，需要复制多个 DLL 文件
 
 ##### 连接失败
 
