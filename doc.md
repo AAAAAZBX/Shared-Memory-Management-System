@@ -95,16 +95,17 @@
 
 ```
 Shared-Memory-Manage-System/
-├── core/                           # 核心库（未来可编译成 DLL）
+├── core/                           # 核心库（可编译成 DLL）
 │   ├── shared_memory_pool/        # 内存池核心模块
 │   │   ├── shared_memory_pool.h   # 内存池类声明
 │   │   └── shared_memory_pool.cpp # 内存池类实现
 │   ├── persistence/                # 持久化模块
 │   │   ├── persistence.h          # 持久化接口声明
 │   │   └── persistence.cpp         # 持久化实现
-│   └── api/                        # C API 包装层
-│       ├── smm_api.h              # C API 头文件
-│       └── smm_api.cpp            # C API 实现
+│   ├── api/                        # C API 包装层
+│   │   ├── smm_api.h              # C API 头文件
+│   │   └── smm_api.cpp            # C API 实现
+│   └── build_dll.bat              # DLL 编译脚本
 ├── server/                         # 服务器端程序（使用 core/）
 │   ├── main.cpp                   # 服务器主程序入口
 │   ├── command/                    # 命令处理模块
@@ -116,15 +117,20 @@ Shared-Memory-Manage-System/
 │   │   ├── protocol.h             # 网络协议定义
 │   │   ├── protocol.cpp           # 协议编解码实现
 │   │   └── README_TCP.md          # TCP 客户端接口设计说明
-│   ├── MEMORY_POOL_SIZE_GUIDE.md  # 内存池大小配置指南
 │   ├── run.bat                    # 编译运行脚本
 │   └── build.bat                  # 编译脚本
 ├── sdk/                            # SDK 发布包结构
 │   ├── include/                   # 头文件目录
+│   │   └── client_sdk.h          # C++ 客户端 SDK 头文件
+│   ├── src/                       # 源代码目录
+│   │   └── client_sdk.cpp        # C++ 客户端 SDK 实现
+│   ├── examples/                  # 示例代码目录
+│   │   ├── basic_usage.cpp       # C API 基础使用示例
+│   │   ├── client_cli.cpp        # C++ 客户端 CLI 示例
+│   │   └── use_dll.cpp           # DLL 直接使用示例
 │   ├── lib/                       # 库文件目录
 │   ├── docs/                      # 文档目录
-│   ├── examples/                  # 示例代码目录
-│   │   └── basic_usage.cpp        # C API 基础使用示例
+│   ├── build.bat                  # SDK 编译脚本
 │   └── README.md                  # SDK 说明
 ├── client/                         # 客户端实现
 │   ├── client.py                  # 客户端参考实现
@@ -135,9 +141,10 @@ Shared-Memory-Manage-System/
 │   └── 测试中文.txt               # 中文测试文件
 ├── README.md                       # 项目说明文档（面向用户）
 ├── doc.md                          # 技术文档（面向开发者，本文件）
-├── details.md                      # 项目需求文档
 ├── DLL_SDK_GUIDE.md               # DLL/SDK 打包指南
-└── JAVA_GC_REFERENCE.md           # Java GC 原理参考
+├── JAVA_GC_REFERENCE.md           # Java GC 原理参考
+├── example.txt                     # 示例文件
+└── problem.txt                     # 问题记录
 ```
 
 ### 0.3 文件功能说明
@@ -196,8 +203,8 @@ Shared-Memory-Manage-System/
 #### 持久化模块 (`core/persistence`)
 - **职责**：序列化/反序列化内存池状态
 - **核心函数**：`Persistence::Save()` / `Load()`
-- **文件格式**：二进制格式（版本3），包含文件头、元数据、位图、内存块信息、最后修改时间、内存池数据
-- **版本兼容**：支持加载版本1和版本2的旧文件
+- **文件格式**：二进制格式，包含文件头、元数据、位图、内存块信息、最后修改时间、Next Fit 搜索位置、内存池数据
+- **向后兼容**：如果加载的文件缺少 `next_search_pos_`，会自动计算第一个空闲位置
 - **位置**：`core/persistence/`（已从 `server/` 移至 `core/`）
 
 #### 网络模块 (`network`)
@@ -353,9 +360,9 @@ struct CommandSpec {
 ```cpp
 struct FileHeader {
     uint32_t magic;             // 魔数 "MEMP" (0x4D454D50)
-    uint32_t version;           // 版本号 (1: 基础版本, 2: 包含时间信息, 3: Memory ID 系统)
+    uint32_t reserved_version;  // 保留字段（不再使用）
     size_t free_block_count;    // 空闲块数量
-    size_t memory_info_count;  // 内存信息条目数（版本3），或 user_info_count（版本1/2）
+    size_t memory_info_count;   // 内存信息条目数
     uint64_t reserved[4];       // 预留字段
 };
 ```
@@ -363,16 +370,16 @@ struct FileHeader {
 **文件内容顺序**：
 1. 文件头（48 字节）
 2. 元数据数组（kBlockCount 个块）
-   - 版本3：包含 memory_id 和 description（仅支持 Base62 格式）
+   - 包含 memory_id 和 description（Base62 格式）
 3. 使用状态位图
-4. 内存块信息映射（版本3）或用户块信息映射（版本1/2）
-5. 最后修改时间映射（版本2/3）
-6. 内存池数据（kPoolSize 字节，当前为 1GB）
+4. 内存块信息映射
+5. 最后修改时间映射
+6. Next Search Position（`sizeof(size_t)`，Next Fit 优化位置）
+7. 内存池数据（kPoolSize 字节，当前为 1GB）
 
-**版本兼容性**：
-- 版本1：基础版本，不包含时间信息
-- 版本2：包含用户最后修改时间信息，支持向后兼容（可加载版本1文件）
-- 版本3：使用 Memory ID 和描述系统，支持向后兼容（可加载版本1和版本2文件）
+**向后兼容性**：
+- 已移除版本字段，直接按当前格式读写
+- 如果加载的文件缺少 `next_search_pos_`，会自动计算第一个空闲位置
 
 #### 核心API
 

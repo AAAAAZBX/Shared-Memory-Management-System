@@ -178,8 +178,8 @@
 - 支持程序正常退出（`quit`/`exit`）时保存
 - 支持异常退出（Ctrl+C、Ctrl+Z）时自动保存
 - 程序启动时自动加载之前保存的状态
-- 二进制文件格式（版本2），包含文件头、元数据、使用状态位图、用户块信息、用户最后修改时间和内存池数据
-- 支持版本兼容：可以加载版本1的旧文件（时间信息为空）
+- 二进制文件格式，包含文件头、元数据、使用状态位图、内存块信息、最后修改时间、Next Fit 搜索位置和内存池数据
+- 支持向后兼容：如果加载的文件缺少 `next_search_pos_`，会自动计算第一个空闲位置
 
 #### 7. 批量执行（`exec`）
 - `exec <filename>`：从文件读取并执行命令
@@ -251,7 +251,7 @@ struct BlockMeta {
 ┌─────────────────────────────────────────────────────────┐
 │ 1. FileHeader (文件头)                                    │
 │    - magic: uint32_t (0x4D454D50, "MEMP")                │
-│    - version: uint32_t (当前版本: 3)                      │
+│    - reserved_version: uint32_t (保留字段，不再使用)     │
 │    - free_block_count: size_t (空闲块数量)                │
 │    - memory_info_count: size_t (内存信息条目数)           │
 │    - reserved: uint64_t[4] (预留字段)                    │
@@ -281,7 +281,10 @@ struct BlockMeta {
 │    - key: char[keyLen] (Memory ID 字符串)               │
 │    - timeValue: time_t (最后修改时间戳)                  │
 ├─────────────────────────────────────────────────────────┤
-│ 6. Pool Data (内存池数据)                                 │
+│ 6. Next Search Position (Next Fit 优化位置)             │
+│    - next_search_pos_: size_t (下次分配时的搜索起始位置) │
+├─────────────────────────────────────────────────────────┤
+│ 7. Pool Data (内存池数据)                                 │
 │    - pool_: uint8_t[kPoolSize] (内存池原始数据)          │
 └─────────────────────────────────────────────────────────┘
 ```
@@ -291,16 +294,17 @@ struct BlockMeta {
 - **文件类型**：二进制文件
 - **字节序**：小端序（Little-Endian，Windows 默认）
 - **魔数**：`0x4D454D50`（ASCII: "MEMP"），用于文件格式验证
-- **版本号**：当前为 `3`，用于未来格式升级兼容
-- **版本兼容**：支持加载版本1和版本2的旧文件（向后兼容）
+- **版本号**：已移除版本字段，使用 `reserved_version` 占位（不再使用）
+- **向后兼容**：支持加载旧格式文件（如果缺少 `next_search_pos_`，会自动计算第一个空闲位置）
 
 #### 文件大小估算
 
 - 文件头：`sizeof(FileHeader)` ≈ 48 字节
 - 元数据数组：262,144 × (1 + 8 + 8 + 可变字符串长度) ≈ 4-15 MB（取决于字符串长度）
-- Used Map：32 字节
+- Used Map：32,768 字节（32KB）
 - Memory Info：可变（取决于内存块数量）
 - Memory Last Modified Time：可变（取决于内存块数量）
+- Next Search Position：`sizeof(size_t)` ≈ 8 字节
 - Pool Data：kPoolSize 字节（当前为 1GB）
 - **总大小**：约 1GB+（取决于元数据大小）
 
@@ -727,16 +731,17 @@ TCP    0.0.0.0:8888           0.0.0.0:0              LISTENING
 
 ```
 Shared-Memory-Manage-System/
-├── core/                                 # 核心库（未来可编译成 DLL）
+├── core/                                 # 核心库（可编译成 DLL）
 │   ├── shared_memory_pool/              # 内存池核心模块
 │   │   ├── shared_memory_pool.h         # 内存池类声明
 │   │   └── shared_memory_pool.cpp       # 内存池实现
 │   ├── persistence/                      # 持久化模块
 │   │   ├── persistence.h                # 持久化模块声明
-│   │   └── persistence.cpp              # 持久化实现（版本3）
-│   └── api/                              # C API 包装层
-│       ├── smm_api.h                    # C API 头文件
-│       └── smm_api.cpp                  # C API 实现
+│   │   └── persistence.cpp               # 持久化实现
+│   ├── api/                              # C API 包装层
+│   │   ├── smm_api.h                    # C API 头文件
+│   │   └── smm_api.cpp                  # C API 实现
+│   └── build_dll.bat                    # DLL 编译脚本
 ├── server/                               # 服务器端程序（使用 core/）
 │   ├── main.cpp                         # 主程序入口，REPL 循环
 │   ├── command/                         # 命令处理模块
@@ -748,15 +753,20 @@ Shared-Memory-Manage-System/
 │   │   ├── protocol.h                  # 网络协议定义
 │   │   ├── protocol.cpp                 # 协议编解码实现
 │   │   └── README_TCP.md               # TCP 客户端接口设计说明
-│   ├── MEMORY_POOL_SIZE_GUIDE.md        # 内存池大小配置指南
 │   ├── run.bat                          # 编译运行脚本
 │   └── build.bat                        # 编译脚本
 ├── sdk/                                  # SDK 发布包结构
 │   ├── include/                         # 头文件目录
+│   │   └── client_sdk.h                # C++ 客户端 SDK 头文件
+│   ├── src/                             # 源代码目录
+│   │   └── client_sdk.cpp              # C++ 客户端 SDK 实现
+│   ├── examples/                        # 示例代码目录
+│   │   ├── basic_usage.cpp             # C API 基础使用示例
+│   │   ├── client_cli.cpp              # C++ 客户端 CLI 示例
+│   │   └── use_dll.cpp                 # DLL 直接使用示例
 │   ├── lib/                             # 库文件目录
 │   ├── docs/                            # 文档目录
-│   ├── examples/                        # 示例代码目录
-│   │   └── basic_usage.cpp              # C API 基础使用示例
+│   ├── build.bat                        # SDK 编译脚本
 │   └── README.md                        # SDK 说明
 ├── client/                               # 客户端实现
 │   ├── client.py                        # 客户端参考实现
@@ -765,13 +775,12 @@ Shared-Memory-Manage-System/
 │   ├── env.txt                          # 6KB 文件示例（2 blocks）
 │   ├── error.txt                        # 153KB 文件示例
 │   └── 测试中文.txt                     # 中文测试文件
-├── doc.md                               # 技术文档（面向开发者）
 ├── README.md                            # 项目说明文档（本文件）
-├── details.md                           # 项目需求文档
+├── doc.md                               # 技术文档（面向开发者）
 ├── DLL_SDK_GUIDE.md                     # DLL/SDK 打包指南
-├── JAVA_GC_REFERENCE.md                # Java GC 原理参考
-├── problem.txt                         # 问题记录
-└── instractions.txt                     # 说明文件
+├── JAVA_GC_REFERENCE.md                 # Java GC 原理参考
+├── example.txt                          # 示例文件
+└── problem.txt                          # 问题记录
 ```
 
 ## 技术栈
