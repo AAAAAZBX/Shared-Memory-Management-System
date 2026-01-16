@@ -15,7 +15,7 @@
       - [1. 内存池初始化与重置](#1-内存池初始化与重置)
       - [2. 内存增删查改（CRUD）](#2-内存增删查改crud)
       - [3. 内存紧凑（`compact`）](#3-内存紧凑compact)
-      - [4. 状态查询（`status`）](#4-状态查询status)
+      - [4. 状态查询（`status` / `info`）](#4-状态查询status--info)
       - [5. 命令行界面](#5-命令行界面)
       - [6. 数据持久化](#6-数据持久化)
       - [7. 批量执行（`exec`）](#7-批量执行exec)
@@ -120,7 +120,7 @@
 - 按 `memory_id` 为单位整体移动，确保同一内存的所有块连续移动
 - 更新内存块信息映射关系，确保 compact 后所有已使用的块连续排列
 
-#### 4. 状态查询（`status` / `info`）
+#### 4. 状态查询（`status` / `info`） {#4-状态查询status--info}
 - `status --memory`：显示内存池使用情况，按 Memory ID 展示占用范围（格式：`block_000 - block_015(16 blocks, 64KB)`）
   - 包含列：Memory ID、Description、Bytes（实际数据大小）、Range（包含块数和大小信息）、Last Modified
   - 支持中文显示，表格列自动对齐（中文字符按 2 个显示宽度计算）

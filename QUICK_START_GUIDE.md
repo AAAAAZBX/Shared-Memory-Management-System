@@ -103,7 +103,7 @@ client> quit
 
 #### 方式 C：使用 DLL/SDK（本地调用，无需网络）
 
-**查看文档**：`sdk/README_DLL.md`
+**查看文档**：`sdk/README.md`（DLL/SDK 方式章节）
 
 **说明**：这种方式是直接链接 DLL，不需要网络连接，但需要将 DLL 部署到客户端机器。
 
@@ -187,7 +187,7 @@ cd sdk
 | **server/network/README_TCP.md** | TCP 协议和外部访问 | 外部主机访问配置（必须） |
 | **client/README.md** | Python 客户端使用 | 快速开始、Python 客户端示例 |
 | **sdk/README.md** | C++ SDK 使用 | 快速开始、方式一：交互式命令行 |
-| **sdk/README_DLL.md** | DLL 方式使用 | 仅当需要本地调用时阅读 |
+| **sdk/README.md** | DLL 和 TCP 方式使用 | 包含 DLL 方式和 TCP 客户端方式的完整说明 |
 
 ---
 
