@@ -94,7 +94,7 @@
 ### 0.2 目录结构
 
 ```
-Shared-Memory-Manage-System/
+Shared-Memory-Manager/
 ├── core/                           # 核心库（可编译成 DLL）
 │   ├── shared_memory_pool/        # 内存池核心模块
 │   │   ├── shared_memory_pool.h   # 内存池类声明

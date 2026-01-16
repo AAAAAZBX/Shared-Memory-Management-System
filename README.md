@@ -47,7 +47,7 @@
       - [完整阅读（深入了解）](#完整阅读深入了解)
     - [客户端使用方式](#客户端使用方式)
       - [方式 A：使用 Python 客户端（推荐，最简单）](#方式-a使用-python-客户端推荐最简单)
-      - [方式 B：使用 C++ SDK（命令行工具）](#方式-b使用-c-sdk命令行工具)
+      - [方式 B：使用 C++ SDK（命令行工具，推荐用于命令行操作）](#方式-b使用-c-sdk命令行工具推荐用于命令行操作)
       - [方式 C：使用 DLL/SDK（本地调用，无需网络）](#方式-c使用-dllsdk本地调用无需网络)
     - [重要提示](#重要提示)
     - [故障排除](#故障排除)
@@ -482,24 +482,77 @@ content = client.read(memory_id)
 client.delete(memory_id)
 ```
 
-#### 方式 B：使用 C++ SDK（命令行工具）
+#### 方式 B：使用 C++ SDK（命令行工具，推荐用于命令行操作）
+
+**适用场景**：想要像 server 端一样通过命令行交互，不需要写代码。
 
 **查看文档**：`sdk/README.md`
 
-**快速使用**：
+**快速开始**：
+
 ```bash
-# 编译客户端 CLI
+# 1. 编译客户端 CLI 工具
 cd sdk
 .\build.bat
 
-# 运行客户端（交互式命令行）
+# 2. 运行客户端（交互式命令行，与 server 端使用方式完全相同）
 .\examples\client_cli.exe 192.168.1.100 8888
+```
 
-# 然后可以像 server 一样输入命令：
-client> alloc "测试" "Hello World"
+**使用示例**（与 server 端命令完全相同）：
+```
+##############################################
+#                                            #
+#        Shared Memory Manager Client        #
+#                                            #
+##############################################
+
+Connected to server at 192.168.1.100:8888
+Type 'help' for help, 'quit' or 'exit' to exit.
+
+client> alloc "测试数据" "Hello World"
+Memory allocated: memory_00001
+
 client> read memory_00001
+----------------------------------------
+Memory ID: memory_00001
+Description: 测试数据
+Last Modified: 2026-01-15 10:30:45
+----------------------------------------
+Hello World
+
 client> status --memory
+Memory Pool Status:
+  Total Blocks: 262144
+  Used Blocks: 1
+  Free Blocks: 262143
+  ...
+
 client> quit
+Bye!
+```
+
+**支持的命令**（与 server 端完全相同）：
+- `alloc "<description>" "<content>"` - 分配内存
+- `read <memory_id>` - 读取内存内容
+- `update <memory_id> "<new_content>"` - 更新内存内容
+- `free <memory_id>` - 释放内存
+- `delete <memory_id>` - 删除内存（free 的别名）
+- `status [--memory|--block]` - 查询状态
+- `info` - 显示系统信息
+- `help` - 显示帮助信息
+- `quit` / `exit` - 退出客户端
+
+**命令行参数**：
+```bash
+# 使用默认地址和端口（127.0.0.1:8888）
+.\examples\client_cli.exe
+
+# 指定服务器地址
+.\examples\client_cli.exe 192.168.1.100
+
+# 指定服务器地址和端口
+.\examples\client_cli.exe 192.168.1.100 8888
 ```
 
 #### 方式 C：使用 DLL/SDK（本地调用，无需网络）
@@ -730,7 +783,7 @@ TCP    0.0.0.0:8888           0.0.0.0:0              LISTENING
 ## 项目结构
 
 ```
-Shared-Memory-Manage-System/
+Shared-Memory-Manager/
 ├── core/                                 # 核心库（可编译成 DLL）
 │   ├── shared_memory_pool/              # 内存池核心模块
 │   │   ├── shared_memory_pool.h         # 内存池类声明
