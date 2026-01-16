@@ -54,7 +54,7 @@ if errorlevel 1 (
 echo DLL created: lib/smm_client.dll
 echo Import library created: lib/smm_client.lib
 
-REM Build example program
+REM Build example program (dynamic linking)
 echo.
 echo [3/4] Building example: client_cli...
 "%GPP%" -std=c++17 examples/client_cli.cpp -Iinclude -Llib -lsmm_client -o examples/client_cli.exe -lws2_32
@@ -64,6 +64,17 @@ if errorlevel 1 (
   exit /b 1
 )
 echo Example built: examples/client_cli.exe
+
+REM Build example program with static linking (standalone)
+echo.
+echo [3b/4] Building standalone example: client_cli_static...
+"%GPP%" -std=c++17 examples/client_cli.cpp -Iinclude -Llib -lsmm_client -o examples/client_cli_static.exe -lws2_32 -static-libgcc -static-libstdc++ -static
+if errorlevel 1 (
+  echo Warning: Failed to build static example (may require static libraries)
+) else (
+  echo Standalone example built: examples/client_cli_static.exe
+  echo This executable can run on any Windows machine without DLLs.
+)
 
 REM Cleanup temporary files
 echo.
