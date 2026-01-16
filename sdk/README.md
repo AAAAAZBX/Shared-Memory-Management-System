@@ -375,16 +375,18 @@ TCP    0.0.0.0:8888           0.0.0.0:0              LISTENING
 
 ##### 阶段 2：客户端端准备
 
-**步骤 2.1：编译客户端 SDK**
+**步骤 2.1：在服务器端编译客户端程序**
 
-**重要**：如果你不想在客户端机器安装开发工具（MinGW-w64），有两种方式：
+**⚠️ 重要提示**：
+- ✅ 这些编译命令**必须在服务器端**（有开发环境的机器）运行
+- ❌ **不要在客户端机器上运行这些编译命令**
+- ✅ 客户端机器**不需要安装任何开发工具**（MinGW-w64、MSYS2 等）
+- ✅ 客户端只需要复制编译好的 `.exe` 文件
 
-**方式 A：在服务器端编译静态链接版本（推荐）✅**
-
-在服务器端（有开发环境的机器）编译静态链接版本，生成独立可执行文件：
+**在服务器端（有开发环境的机器）编译静态链接版本**：
 
 ```bash
-# 进入 SDK 目录
+# 在服务器端执行（不是客户端！）
 cd sdk
 
 # 编译静态链接版本（独立可执行文件，无需 DLL）
@@ -396,39 +398,19 @@ cmd /c build_client_static.bat
 # 输出：client_static.exe
 ```
 
-然后将 `client_cli_static.exe` 或 `client_static.exe` 复制到客户端机器即可运行，**无需安装任何开发工具或 DLL**。
+**如果看到 "Please install MinGW-w64" 错误**：
+- 说明你在客户端机器上运行了编译脚本
+- 解决：在**服务器端**运行编译脚本，然后将编译好的 `.exe` 文件复制到客户端
+
+**将编译好的文件复制到客户端机器**：
+
+只需将 `client_cli_static.exe` 或 `client_static.exe` 复制到客户端机器即可运行，**客户端无需安装任何开发工具或 DLL**。
 
 **重要提示**：
 - ✅ 静态链接版本（`*_static.exe`）是独立可执行文件，不依赖任何 DLL
-- ❌ 动态链接版本（`*.exe`）需要 MinGW 运行时 DLL（`libgcc_s_seh-1.dll`, `libstdc++-6.dll` 等）
-- ⚠️ 如果通过 Git 复制代码，`.gitignore` 会忽略编译文件（`*.exe`, `*.dll`），需要在服务器端编译后再复制
-
-**方式 B：在客户端机器编译（需要开发环境）**
-
-在客户端机器上（需要安装 MinGW-w64）：
-
-```bash
-# 进入 SDK 目录
-cd sdk
-
-# 编译客户端 SDK 和示例程序（Windows PowerShell）
-cmd /c build.bat
-
-# 或使用 PowerShell 脚本
-.\build.ps1
-```
-
-编译完成后会生成：
-- `lib/libsmm_client.a` - 静态库
-- `lib/smm_client.dll` - 动态库
-- `examples/client_cli.exe` - 完整的客户端 CLI 工具（动态链接，需要 DLL）
-- `examples/client_cli_static.exe` - 完整的客户端 CLI 工具（静态链接，独立可执行文件）✅ **推荐**
-- `client.exe` - 简单客户端程序（动态链接）
-- `client_static.exe` - 简单客户端程序（静态链接，独立可执行文件）✅ **推荐**
-
-**部署说明**：
-- ✅ **静态链接版本**（`*_static.exe`）：只需复制可执行文件到客户端机器，无需任何 DLL 或开发工具
-- ❌ **动态链接版本**（`*.exe`）：需要复制可执行文件和 MinGW 运行时 DLL（`libgcc_s_seh-1.dll`, `libstdc++-6.dll` 等）
+- ✅ 客户端机器**不需要**安装 MinGW-w64、MSYS2 或任何其他开发工具
+- ✅ 客户端机器**不需要**任何 DLL 文件
+- ⚠️ 如果通过 Git 复制代码，`.gitignore` 会忽略编译文件（`*.exe`, `*.dll`），必须在服务器端编译后再复制可执行文件
 
 **步骤 2.2：测试网络连通性（可选但推荐）**
 
@@ -632,117 +614,64 @@ netsh advfirewall firewall add rule name="SMM Server" dir=in action=allow protoc
 **客户端端（互联网上的任意机器）**：
 
 ```bash
-# 1. 编译客户端（同上）
-cd sdk
-cmd /c build.bat
-
-# 2. 使用公网 IP 连接
-.\examples\client_cli.exe <公网IP> 8888
+# 1. 在服务器端编译静态链接版本（见步骤 2.1）
+# 2. 将 client_cli_static.exe 复制到客户端机器
+# 3. 在客户端机器上运行（无需任何开发工具）
+.\client_cli_static.exe <公网IP> 8888
 ```
 
 #### 快速开始
 
-##### 1. 编译客户端 SDK
+**⚠️ 重要提示**：
+- ✅ 以下编译步骤**必须在服务器端**（有开发环境的机器）完成
+- ❌ **不要在客户端机器上运行编译命令**
+- ✅ 客户端机器**不需要安装任何开发工具**（MinGW-w64、MSYS2 等）
+- ✅ 客户端只需要复制编译好的 `.exe` 文件
 
-**Windows (MinGW/MSVC)**：
+**如果看到 "Please install MinGW-w64" 错误**：
+- 说明你在客户端机器上运行了编译脚本
+- 解决：在**服务器端**运行编译脚本，然后将编译好的 `.exe` 文件复制到客户端
 
-```bash
-# 编译静态库
-g++ -std=c++17 -c src/client_sdk.cpp -Iinclude -o lib/client_sdk.o
-ar rcs lib/libsmm_client.a lib/client_sdk.o
-
-# 编译 DLL
-g++ -std=c++17 -shared src/client_sdk.cpp -Iinclude -o lib/smm_client.dll -lws2_32 -Wl,--out-implib,lib/smm_client.lib
-
-# 编译示例程序
-g++ -std=c++17 examples/client_cli.cpp -Iinclude -Llib -lsmm_client -o examples/client_cli.exe -lws2_32
-```
-
-**Linux**：
-
-```bash
-# 编译静态库
-g++ -std=c++17 -c src/client_sdk.cpp -Iinclude -fPIC -o lib/client_sdk.o
-ar rcs lib/libsmm_client.a lib/client_sdk.o
-
-# 编译共享库
-g++ -std=c++17 -shared src/client_sdk.cpp -Iinclude -fPIC -o lib/libsmm_client.so
-
-# 编译示例程序
-g++ -std=c++17 examples/client_cli.cpp -Iinclude -Llib -lsmm_client -o examples/client_cli
-```
-
-##### 2. 编译客户端程序
-
-**重要提示**：客户端程序有两种编译方式：
-
-- **动态链接**：需要 MinGW 运行时 DLL（`libgcc_s_seh-1.dll`, `libstdc++-6.dll` 等）
-- **静态链接**：独立可执行文件，无需任何 DLL，可直接复制到任何 Windows 机器运行 ✅ **推荐用于客户端部署**
+##### 1. 在服务器端编译客户端程序（静态链接版本）
 
 **编译 `include/client.cpp`（简单示例）**：
 
-**方式一：静态链接（推荐，独立可执行文件）**：
-
 ```bash
-# 使用静态链接编译脚本
+# 在服务器端执行
 cd sdk
 cmd /c build_client_static.bat
 # 输出：client_static.exe（独立可执行文件，无需 DLL）
-
-# 或手动编译
-g++ -std=c++17 include/client.cpp -Iinclude -Llib -lsmm_client -o client_static.exe -lws2_32 -static-libgcc -static-libstdc++ -static
-```
-
-**方式二：动态链接（需要运行时 DLL）**：
-
-```bash
-# 使用编译脚本
-cd sdk
-cmd /c build_client.bat
-# 输出：client.exe（需要 MinGW 运行时 DLL）
-
-# 或手动编译
-g++ -std=c++17 include/client.cpp -Iinclude -Llib -lsmm_client -o client.exe -lws2_32
 ```
 
 **编译 `examples/client_cli.cpp`（完整示例）**：
 
-**方式一：静态链接（推荐，独立可执行文件）**：
-
 ```bash
-# 使用静态链接编译脚本
+# 在服务器端执行
 cd sdk
 cmd /c build_client_cli_static.bat
 # 输出：examples/client_cli_static.exe（独立可执行文件，无需 DLL）
-
-# 或使用 build.bat（会自动编译静态版本）
-cd sdk
-cmd /c build.bat
-# 输出：examples/client_cli_static.exe
-
-# 或手动编译
-g++ -std=c++17 examples/client_cli.cpp -Iinclude -Llib -lsmm_client -o examples/client_cli_static.exe -lws2_32 -static-libgcc -static-libstdc++ -static
 ```
 
-**方式二：动态链接（需要运行时 DLL）**：
+##### 2. 部署到客户端机器
+
+**只需复制可执行文件**：
+
+将 `client_static.exe` 或 `client_cli_static.exe` 复制到客户端机器即可运行。
+
+**客户端机器要求**：
+- ✅ Windows 操作系统
+- ✅ 无需安装任何开发工具（MinGW-w64、MSYS2 等）
+- ✅ 无需任何 DLL 文件
+- ✅ 无需配置 PATH 环境变量
+
+**在客户端机器上运行**：
 
 ```bash
-# 使用 build.bat
-cd sdk
-cmd /c build.bat
-# 输出：examples/client_cli.exe（需要 MinGW 运行时 DLL）
-
-# 或手动编译
-g++ -std=c++17 examples/client_cli.cpp -Iinclude -Llib -lsmm_client -o examples/client_cli.exe -lws2_32
+# 直接运行，无需任何依赖
+.\client_cli_static.exe 192.168.1.100 8888
+# 或
+.\client_static.exe 192.168.1.100 8888
 ```
-
-**部署到客户端机器**：
-
-- ✅ **静态链接版本**：只需复制 `client_static.exe` 或 `client_cli_static.exe` 到客户端机器，无需任何 DLL 或开发工具
-- ❌ **动态链接版本**：需要复制以下文件到客户端机器：
-  - `client.exe` 或 `client_cli.exe`
-  - `smm_client.dll`（如果使用 DLL）
-  - MinGW 运行时 DLL（`libgcc_s_seh-1.dll`, `libstdc++-6.dll` 等，通常在 MinGW 的 `bin` 目录中）
 
 ##### 3. 使用客户端 SDK
 

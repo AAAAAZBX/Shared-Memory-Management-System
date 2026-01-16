@@ -2,7 +2,15 @@
 setlocal enabledelayedexpansion
 cd /d "%~dp0"
 
+echo ========================================
+echo IMPORTANT: This script must be run on the SERVER machine
+echo (the machine with development tools installed).
+echo ========================================
+echo.
 echo Building client.cpp with static linking (standalone executable)...
+echo This will create a standalone executable that can run on client machines
+echo without any development tools or DLLs.
+echo.
 
 REM Find g++
 for /f "delims=" %%i in ('where g++ 2^>nul') do (
@@ -11,7 +19,23 @@ for /f "delims=" %%i in ('where g++ 2^>nul') do (
 )
 
 echo [ERROR] g++ not found in PATH.
-echo Please install MSYS2/MinGW-w64 and add ...\ucrt64\bin to PATH.
+echo.
+echo ========================================
+echo IMPORTANT: This script MUST be run on the SERVER machine!
+echo ========================================
+echo.
+echo This script requires MinGW-w64 to compile the client program.
+echo It should ONLY be run on the SERVER machine (where you have development tools).
+echo.
+echo Client machines do NOT need MinGW-w64 or any development tools.
+echo After compilation on the server, just copy the .exe file to client machines.
+echo.
+echo To fix this error:
+echo   1. Make sure you are running this on the SERVER machine (not client)
+echo   2. Install MSYS2/MinGW-w64 on the SERVER machine
+echo   3. Add MinGW-w64 bin directory to PATH (e.g., ...\ucrt64\bin)
+echo   4. Run this script again on the SERVER machine
+echo   5. Copy the compiled .exe file to client machines
 pause
 exit /b 1
 
