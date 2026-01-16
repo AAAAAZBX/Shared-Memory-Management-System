@@ -281,7 +281,7 @@ public class SMM {
 
 ### 方式二：TCP 客户端方式（远程访问）
 
-通过 TCP 连接到服务器进行操作（已废弃，推荐使用 DLL 方式）。
+通过 TCP 连接到服务器进行操作，支持局域网和公网访问。
 
 #### 客户端 SDK 概述
 
@@ -294,6 +294,310 @@ public class SMM {
 - ✅ **TCP 连接**：通过 TCP 协议连接到服务器
 - ✅ **跨平台**：支持 Windows 和 Linux
 - ✅ **易于集成**：可编译成 DLL（Windows）或共享库（Linux）
+- ✅ **远程访问**：支持局域网和公网访问
+
+#### 完整流程：从服务器启动到远程客户端连接
+
+本流程将指导你完成从服务器端启动到远程客户端成功连接的完整过程。
+
+##### 阶段 1：服务器端准备
+
+**步骤 1.1：启动服务器**
+
+在服务器机器上：
+
+```bash
+# 进入服务器目录
+cd server
+
+# 编译并运行服务器（Windows PowerShell）
+cmd /c run.bat
+
+# 或使用 PowerShell 脚本（如果存在）
+.\run.ps1
+```
+
+**步骤 1.2：记录服务器 IP 地址**
+
+服务器启动后会显示可访问的 IP 地址，例如：
+
+```
+##############################################
+#                                            #
+#            Shared Memory Manager           #
+#                                            #
+##############################################
+
+Server is ready for client connections:
+
+  Private IP (LAN access):
+    192.168.20.31:8888 (LAN access)
+    172.29.56.108:8888 (LAN access)
+
+  Local only:  127.0.0.1:8888 (Local access only)
+
+Note: External clients should use Private IP addresses.
+========================================
+```
+
+**重要提示**：
+- ✅ **使用主网卡 IP**（如 `192.168.20.31`）- 这是外机可以 ping 通的 IP
+- ❌ **不要使用虚拟网卡 IP**（如 `172.29.56.108`）- 外机无法访问
+- ❌ **不要使用 `127.0.0.1`** - 只能本地访问
+
+**步骤 1.3：配置防火墙（服务器端）**
+
+在服务器上以**管理员身份**运行 PowerShell：
+
+```powershell
+# 允许 TCP 8888 端口入站连接
+netsh advfirewall firewall add rule name="SMM Server" dir=in action=allow protocol=TCP localport=8888
+
+# 验证规则是否添加成功
+netsh advfirewall firewall show rule name="SMM Server"
+```
+
+**步骤 1.4：验证服务器监听状态**
+
+在服务器上运行：
+
+```powershell
+# 检查端口是否监听
+netstat -an | findstr :8888
+```
+
+应该看到：
+```
+TCP    0.0.0.0:8888           0.0.0.0:0              LISTENING
+```
+
+`0.0.0.0:8888` 表示服务器监听所有网络接口的 8888 端口，可以通过任何 IP 访问。
+
+##### 阶段 2：客户端端准备
+
+**步骤 2.1：编译客户端 SDK**
+
+在客户端机器上（可以是同一台机器或远程机器）：
+
+```bash
+# 进入 SDK 目录
+cd sdk
+
+# 编译客户端 SDK 和示例程序（Windows PowerShell）
+cmd /c build.bat
+
+# 或使用 PowerShell 脚本
+.\build.ps1
+```
+
+编译完成后会生成：
+- `lib/libsmm_client.a` - 静态库
+- `lib/smm_client.dll` - 动态库
+- `examples/client_cli.exe` - 完整的客户端 CLI 工具
+- `client.exe` - 简单客户端程序（如果编译了 `include/client.cpp`）
+
+**步骤 2.2：测试网络连通性（可选但推荐）**
+
+在客户端机器上测试能否连接到服务器：
+
+```bash
+# 方法 1：使用 ping（测试 ICMP）
+ping 192.168.20.31
+
+# 方法 2：使用 telnet（测试 TCP，推荐）
+telnet 192.168.20.31 8888
+
+# 方法 3：使用 PowerShell（Windows）
+Test-NetConnection -ComputerName 192.168.20.31 -Port 8888
+
+# 方法 4：使用 Python 快速测试
+python -c "import socket; s = socket.socket(); s.settimeout(3); result = s.connect_ex(('192.168.20.31', 8888)); print('Connected!' if result == 0 else 'Failed'); s.close()"
+```
+
+**预期结果**：
+- ✅ 如果连接成功，说明网络和防火墙配置正确
+- ❌ 如果连接失败，检查：
+  1. 服务器是否正在运行
+  2. 防火墙是否已配置
+  3. IP 地址是否正确（使用主网卡 IP）
+
+##### 阶段 3：客户端连接和操作
+
+**步骤 3.1：运行客户端程序**
+
+在客户端机器上：
+
+```bash
+# 方式一：使用完整的客户端 CLI（推荐）
+cd sdk
+.\examples\client_cli.exe 192.168.20.31 8888
+
+# 方式二：使用简单客户端程序
+.\client.exe 192.168.20.31 8888
+```
+
+**步骤 3.2：使用客户端**
+
+连接成功后，会显示：
+
+```
+##############################################
+#                                            #
+#        Shared Memory Manager Client        #
+#                                            #
+##############################################
+
+Connected to server at 192.168.20.31:8888
+Type 'help' for help, 'quit' or 'exit' to exit.
+
+client> 
+```
+
+**步骤 3.3：执行命令**
+
+客户端支持与服务器端相同的命令：
+
+```bash
+# 分配内存
+client> alloc "测试数据" "Hello World"
+Memory allocated: memory_00001
+
+# 读取内存
+client> read memory_00001
+----------------------------------------
+Memory ID: memory_00001
+Description: 测试数据
+Last Modified: 2026-01-15 10:30:45
+----------------------------------------
+Hello World
+
+# 查看状态
+client> status --memory
+Memory Pool Status:
+| MemoryID     | Description | Bytes | Range                    | Last Modified       |
+| ------------ | ----------- | ----- | ------------------------ | ------------------- |
+| memory_00001 | 测试数据    | 11    | block_000 - block_000    | 2026-01-15 10:30:45 |
+
+# 更新内存
+client> update memory_00001 "Updated Content"
+
+# 释放内存
+client> free memory_00001
+
+# 退出
+client> quit
+Bye!
+```
+
+##### 阶段 4：故障排除
+
+如果连接失败，按以下步骤排查：
+
+**问题 1：连接超时或拒绝连接**
+
+```bash
+# 检查服务器是否运行
+# 在服务器上查看控制台输出
+
+# 检查防火墙配置
+netsh advfirewall firewall show rule name="SMM Server"
+
+# 检查端口监听
+netstat -an | findstr :8888
+```
+
+**问题 2：使用了错误的 IP 地址**
+
+- ✅ 使用服务器显示的主网卡 IP（外机可以 ping 通的 IP）
+- ❌ 不要使用虚拟网卡 IP
+- ❌ 不要使用 `127.0.0.1`（只能本地访问）
+
+**问题 3：防火墙阻止连接**
+
+```powershell
+# 重新配置防火墙（以管理员身份运行）
+netsh advfirewall firewall delete rule name="SMM Server"
+netsh advfirewall firewall add rule name="SMM Server" dir=in action=allow protocol=TCP localport=8888
+```
+
+**问题 4：网络不通**
+
+```bash
+# 测试网络连通性
+ping <服务器IP>
+
+# 如果 ping 不通，检查：
+# 1. 服务器和客户端是否在同一局域网
+# 2. 路由器/交换机配置是否正确
+# 3. 网络接口是否正常
+```
+
+##### 完整示例：局域网访问
+
+**服务器端（192.168.20.31）**：
+
+```bash
+# 1. 启动服务器
+cd server
+cmd /c run.bat
+
+# 2. 配置防火墙（管理员权限）
+netsh advfirewall firewall add rule name="SMM Server" dir=in action=allow protocol=TCP localport=8888
+```
+
+**客户端端（192.168.20.32，同一局域网）**：
+
+```bash
+# 1. 编译客户端
+cd sdk
+cmd /c build.bat
+
+# 2. 测试连接
+Test-NetConnection -ComputerName 192.168.20.31 -Port 8888
+
+# 3. 运行客户端
+.\examples\client_cli.exe 192.168.20.31 8888
+
+# 4. 使用客户端
+client> alloc "测试" "Hello from remote client"
+client> status --memory
+client> quit
+```
+
+##### 完整示例：公网访问（需要路由器配置）
+
+**服务器端**：
+
+```bash
+# 1. 启动服务器（同上）
+cd server
+cmd /c run.bat
+
+# 2. 配置防火墙（同上）
+netsh advfirewall firewall add rule name="SMM Server" dir=in action=allow protocol=TCP localport=8888
+
+# 3. 配置路由器端口转发
+# - 登录路由器管理界面
+# - 添加端口转发规则：
+#   外部端口：8888
+#   内部 IP：192.168.20.31（服务器内网 IP）
+#   内部端口：8888
+#   协议：TCP
+
+# 4. 获取公网 IP
+# 访问 https://www.whatismyip.com/ 查看公网 IP
+```
+
+**客户端端（互联网上的任意机器）**：
+
+```bash
+# 1. 编译客户端（同上）
+cd sdk
+cmd /c build.bat
+
+# 2. 使用公网 IP 连接
+.\examples\client_cli.exe <公网IP> 8888
+```
 
 #### 快速开始
 
@@ -327,7 +631,35 @@ g++ -std=c++17 -shared src/client_sdk.cpp -Iinclude -fPIC -o lib/libsmm_client.s
 g++ -std=c++17 examples/client_cli.cpp -Iinclude -Llib -lsmm_client -o examples/client_cli
 ```
 
-##### 2. 使用客户端 SDK
+##### 2. 编译客户端程序
+
+**编译 `include/client.cpp`（简单示例）**：
+
+```bash
+# 方式一：使用编译脚本（推荐）
+cd sdk
+cmd /c build_client.bat
+# 或使用 PowerShell
+.\build_client.ps1
+
+# 方式二：手动编译
+# 首先确保客户端 SDK 库已编译（运行 build.bat）
+g++ -std=c++17 include/client.cpp -Iinclude -Llib -lsmm_client -o client.exe -lws2_32
+```
+
+**编译 `examples/client_cli.cpp`（完整示例）**：
+
+```bash
+# 使用 build.bat（会自动编译示例）
+cd sdk
+cmd /c build.bat
+# 输出：examples/client_cli.exe
+
+# 或手动编译
+g++ -std=c++17 examples/client_cli.cpp -Iinclude -Llib -lsmm_client -o examples/client_cli.exe -lws2_32
+```
+
+##### 3. 使用客户端 SDK
 
 **方式一：交互式命令行（推荐）**：
 
@@ -347,6 +679,19 @@ client> alloc "测试数据" "Hello World"
 client> read memory_00001
 client> status --memory
 client> quit
+```
+
+**运行编译好的程序**：
+
+```bash
+# 运行 client.exe（使用默认地址 127.0.0.1:8888）
+.\client.exe
+
+# 或指定服务器地址和端口
+.\client.exe 192.168.1.100 8888
+
+# 运行 client_cli.exe（支持命令行参数）
+.\examples\client_cli.exe 192.168.1.100 8888
 ```
 
 **方式二：编程接口**：

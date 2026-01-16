@@ -1,14 +1,18 @@
-#include "../include/client_sdk.h"
-#include <iostream>
-#include <sstream>
-#include <vector>
-#include <algorithm>
-#include <cstring>
-
+// Undefine Windows macros that conflict with enum values BEFORE including any headers
 #ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #pragma comment(lib, "ws2_32.lib")
+// Undefine macros after including Windows headers
+#ifdef DELETE
+#undef DELETE
+#endif
+#ifdef ERROR_NOT_FOUND
+#undef ERROR_NOT_FOUND
+#endif
 #else
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -17,13 +21,21 @@
 #include <netdb.h>
 #endif
 
+#include "../include/client_sdk.h"
+#include <iostream>
+#include <sstream>
+#include <vector>
+#include <algorithm>
+#include <cstring>
+
 namespace SMMClient {
 
 // 协议定义（与 server 端保持一致）
+// Note: Using CMD_DELETE instead of DELETE to avoid Windows macro conflict
 enum class CommandType : uint8_t {
     ALLOC = 0x01,
     UPDATE = 0x02,
-    DELETE = 0x03,
+    CMD_DELETE = 0x03, // Renamed from DELETE to avoid Windows macro
     READ = 0x04,
     STATUS = 0x05
 };
@@ -33,8 +45,8 @@ enum class ResponseCode : uint8_t {
     ERROR_INVALID_CMD = 0x01,
     ERROR_INVALID_PARAM = 0x02,
     ERROR_NO_MEMORY = 0x03,
-    ERROR_NOT_FOUND = 0x04,
-    ERROR_ALREADY_EXISTS = 0x05,
+    RESP_ERROR_NOT_FOUND = 0x04,      // Renamed from ERROR_NOT_FOUND to avoid Windows macro
+    RESP_ERROR_ALREADY_EXISTS = 0x05, // Renamed from ERROR_ALREADY_EXISTS to avoid Windows macro
     ERROR_INTERNAL = 0xFF
 };
 
@@ -48,7 +60,8 @@ typedef int SocketHandle;
 #endif
 
 ClientSDK::ClientSDK(const std::string& host, uint16_t port)
-    : host_(host), port_(port), socket_handle_(reinterpret_cast<void*>(INVALID_SOCKET)), connected_(false) {
+    : host_(host), port_(port), socket_handle_(reinterpret_cast<void*>(INVALID_SOCKET)),
+      connected_(false) {
 #ifdef _WIN32
     WSADATA wsaData;
     WSAStartup(MAKEWORD(2, 2), &wsaData);
@@ -77,7 +90,7 @@ bool ClientSDK::Connect() {
     memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(port_);
-    
+
     if (inet_pton(AF_INET, host_.c_str(), &server_addr.sin_addr) <= 0) {
         // 尝试 DNS 解析
         struct hostent* host = gethostbyname(host_.c_str());
@@ -89,7 +102,8 @@ bool ClientSDK::Connect() {
         memcpy(&server_addr.sin_addr, host->h_addr_list[0], host->h_length);
     }
 
-    if (connect(sock, reinterpret_cast<struct sockaddr*>(&server_addr), sizeof(server_addr)) == SOCKET_ERROR) {
+    if (connect(sock, reinterpret_cast<struct sockaddr*>(&server_addr), sizeof(server_addr)) ==
+        SOCKET_ERROR) {
         std::cerr << "Failed to connect to " << host_ << ":" << port_ << "\n";
         closesocket(sock);
         return false;
@@ -133,7 +147,7 @@ bool ClientSDK::ExecuteCommandWithOutput(const std::string& command, std::string
     }
 
     if (tokens.empty()) {
-        return true;  // 空命令
+        return true; // 空命令
     }
 
     std::string cmd = tokens[0];
@@ -158,7 +172,7 @@ bool ClientSDK::ExecuteCommandWithOutput(const std::string& command, std::string
         if (content.front() == '"' && content.back() == '"') {
             content = content.substr(1, content.length() - 2);
         }
-        
+
         std::string data = description + '\0' + content;
         std::string response;
         if (SendRequest(static_cast<uint8_t>(CommandType::ALLOC), data, response)) {
@@ -199,7 +213,7 @@ bool ClientSDK::ExecuteCommandWithOutput(const std::string& command, std::string
             return false;
         }
         std::string response;
-        if (SendRequest(static_cast<uint8_t>(CommandType::DELETE), tokens[1], response)) {
+        if (SendRequest(static_cast<uint8_t>(CommandType::CMD_DELETE), tokens[1], response)) {
             std::cout << response << "\n";
             output = response;
             return true;
@@ -213,7 +227,7 @@ bool ClientSDK::ExecuteCommandWithOutput(const std::string& command, std::string
             return true;
         }
     } else if (cmd == "quit" || cmd == "exit") {
-        return false;  // 退出信号
+        return false; // 退出信号
     } else {
         std::cerr << "Unknown command: " << cmd << ". Type 'help' for help.\n";
         return false;
@@ -224,12 +238,12 @@ bool ClientSDK::ExecuteCommandWithOutput(const std::string& command, std::string
 
 void ClientSDK::StartInteractiveCLI(const std::string& prompt) {
     PrintLogo();
-    
+
     if (!Connect()) {
         std::cerr << "Failed to connect to server at " << host_ << ":" << port_ << "\n";
         return;
     }
-    
+
     std::cout << "Connected to server at " << host_ << ":" << port_ << "\n";
     std::cout << "Type 'help' for help, 'quit' or 'exit' to exit.\n\n";
 
@@ -237,57 +251,58 @@ void ClientSDK::StartInteractiveCLI(const std::string& prompt) {
     while (true) {
         std::cout << prompt;
         std::cout.flush();
-        
+
         if (!std::getline(std::cin, line)) {
             break;
         }
-        
+
         // 去除首尾空白
         line.erase(0, line.find_first_not_of(" \t"));
         line.erase(line.find_last_not_of(" \t") + 1);
-        
+
         if (line.empty()) {
             continue;
         }
-        
+
         if (line == "quit" || line == "exit") {
             std::cout << "Bye!\n";
             break;
         }
-        
+
         ExecuteCommand(line);
         std::cout << "\n";
     }
-    
+
     Disconnect();
 }
 
 bool ClientSDK::SendRequest(uint8_t cmd_type, const std::string& data, std::string& response) {
     SocketHandle sock = reinterpret_cast<SocketHandle>(socket_handle_);
-    
+
     // 构建请求包
     std::vector<uint8_t> packet;
     packet.push_back(cmd_type);
-    
+
     uint32_t data_len = static_cast<uint32_t>(data.size());
     uint32_t net_len = htonl(data_len);
     const uint8_t* len_bytes = reinterpret_cast<const uint8_t*>(&net_len);
     packet.insert(packet.end(), len_bytes, len_bytes + 4);
     packet.insert(packet.end(), data.begin(), data.end());
-    
+
     // 发送请求
-    if (send(sock, reinterpret_cast<const char*>(packet.data()), packet.size(), 0) == SOCKET_ERROR) {
+    if (send(sock, reinterpret_cast<const char*>(packet.data()), packet.size(), 0) ==
+        SOCKET_ERROR) {
         std::cerr << "Failed to send request\n";
         return false;
     }
-    
+
     // 接收响应
     return ReceiveResponse(response);
 }
 
 bool ClientSDK::ReceiveResponse(std::string& response) {
     SocketHandle sock = reinterpret_cast<SocketHandle>(socket_handle_);
-    
+
     // 接收响应头（5字节）
     uint8_t header[5];
     int received = 0;
@@ -299,17 +314,17 @@ bool ClientSDK::ReceiveResponse(std::string& response) {
         }
         received += n;
     }
-    
+
     ResponseCode code = static_cast<ResponseCode>(header[0]);
     uint32_t net_len;
     memcpy(&net_len, header + 1, 4);
     uint32_t data_len = ntohl(net_len);
-    
-    if (data_len > 1024 * 1024) {  // 最大1MB
+
+    if (data_len > 1024 * 1024) { // 最大1MB
         std::cerr << "Response too large\n";
         return false;
     }
-    
+
     // 接收响应数据
     std::vector<char> buffer(data_len);
     received = 0;
@@ -321,14 +336,14 @@ bool ClientSDK::ReceiveResponse(std::string& response) {
         }
         received += n;
     }
-    
+
     response.assign(buffer.data(), data_len);
-    
+
     if (code != ResponseCode::SUCCESS) {
         std::cerr << "Error [" << static_cast<int>(code) << "]: " << response << "\n";
         return false;
     }
-    
+
     return true;
 }
 

@@ -4,11 +4,11 @@ cd /d "%~dp0"
 
 echo Building Shared Memory Management DLL...
 
-REM Create output directories
+REM 创建输出目录
 if not exist "..\sdk\lib" (mkdir "..\sdk\lib")
 if not exist "..\sdk\include" (mkdir "..\sdk\include")
 
-REM Find g++
+REM 查找 g++
 for /f "delims=" %%i in ('where g++ 2^>nul') do (
   set "GPP=%%i"
   goto :found
@@ -25,14 +25,14 @@ set "PATH=%GPPDIR%;%PATH%"
 
 echo Using: "%GPP%"
 
-REM Define compile options
+REM 定义编译选项
 set "INCLUDES=-Iapi -Ishared_memory_pool -Ipersistence"
 set "SOURCES=api/smm_api.cpp shared_memory_pool/shared_memory_pool.cpp persistence/persistence.cpp"
 set "DLL_NAME=..\sdk\lib\smm.dll"
 set "LIB_NAME=..\sdk\lib\smm.lib"
 set "STATIC_LIB=..\sdk\lib\libsmm.a"
 
-REM Build DLL
+REM 编译 DLL
 echo.
 echo [1/3] Building DLL...
 "%GPP%" -std=c++17 -shared -DSMM_BUILDING_DLL %INCLUDES% %SOURCES% -o %DLL_NAME% -Wl,--out-implib,%LIB_NAME%
@@ -44,24 +44,12 @@ if errorlevel 1 (
 echo DLL created: %DLL_NAME%
 echo Import library created: %LIB_NAME%
 
-REM Build static library
+REM 编译静态库
 echo.
 echo [2/3] Building static library...
-"%GPP%" -std=c++17 -c %INCLUDES% api/smm_api.cpp -o api/smm_api.o
+"%GPP%" -std=c++17 -c %INCLUDES% %SOURCES%
 if errorlevel 1 (
-  echo Failed to compile smm_api.cpp
-  pause
-  exit /b 1
-)
-"%GPP%" -std=c++17 -c %INCLUDES% shared_memory_pool/shared_memory_pool.cpp -o shared_memory_pool/shared_memory_pool.o
-if errorlevel 1 (
-  echo Failed to compile shared_memory_pool.cpp
-  pause
-  exit /b 1
-)
-"%GPP%" -std=c++17 -c %INCLUDES% persistence/persistence.cpp -o persistence/persistence.o
-if errorlevel 1 (
-  echo Failed to compile persistence.cpp
+  echo Failed to compile object files
   pause
   exit /b 1
 )
@@ -74,13 +62,13 @@ if errorlevel 1 (
 )
 echo Static library created: %STATIC_LIB%
 
-REM Copy header files to SDK
+REM 复制头文件到 SDK
 echo.
 echo [3/3] Copying header files...
 copy /Y api\smm_api.h ..\sdk\include\smm_api.h >nul
 echo Header file copied: ..\sdk\include\smm_api.h
 
-REM Cleanup temporary files
+REM 清理临时文件
 echo.
 echo Cleaning up...
 del api\smm_api.o 2>nul
